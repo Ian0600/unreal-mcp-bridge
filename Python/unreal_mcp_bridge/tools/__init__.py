@@ -6,8 +6,7 @@ from .pie import register_pie_tools
 from .animgraph import register_animgraph_tools
 from .animnotify import register_animnotify_tools
 from .statetree import register_statetree_tools
-from .camerarig import register_camerarig_tools
-from .camvar import register_camvar_tools
+from .behaviortree import register_behaviortree_tools
 from .material import register_material_tools
 
 __all__ = [
@@ -19,7 +18,6 @@ __all__ = [
     "register_animgraph_tools",
     "register_animnotify_tools",
     "register_statetree_tools",
-    "register_camerarig_tools",
-    "register_camvar_tools",
+    "register_behaviortree_tools",
     "register_material_tools",
 ]

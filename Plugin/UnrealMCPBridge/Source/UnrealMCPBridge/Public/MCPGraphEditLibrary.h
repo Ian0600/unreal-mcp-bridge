@@ -220,6 +220,94 @@ public:
         float Min,
         float Max);
 
+    // ---- Blueprint authoring: structure (variables / functions / components / class defaults) ----
+
+    // Adds a member variable of the given type. TypeString: bool|byte|int|int64|float|string|name|text|
+    // vector|rotator|transform|object|class|struct|enum, or a direct /Script/... object/struct/enum path.
+    // For object/class/struct/enum, SubTypeObjectPath names the class/struct/enum
+    // (e.g. "/Script/Engine.StaticMeshComponent"). bIsArray wraps it in an array. DefaultValue is Unreal
+    // import text (may be empty). Returns true on success.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Blueprint", meta = (DevelopmentOnly))
+    static bool AddMemberVariable(
+        UBlueprint* Blueprint,
+        const FString& VarName,
+        const FString& TypeString,
+        const FString& SubTypeObjectPath,
+        bool bIsArray,
+        const FString& DefaultValue);
+
+    // Adds a new user function graph (with editable entry/result nodes). Returns the graph name, or empty.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Blueprint", meta = (DevelopmentOnly))
+    static FString AddFunctionGraph(UBlueprint* Blueprint, const FString& FunctionName);
+
+    // Adds a component (by class path, e.g. "/Script/Engine.StaticMeshComponent") to the Blueprint's
+    // construction script. If ParentComponentName names an existing component in the SCS, the new one is
+    // attached under it; otherwise it is added at the root. Returns the component's variable name, or empty.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Blueprint", meta = (DevelopmentOnly))
+    static FString AddComponent(
+        UBlueprint* Blueprint,
+        const FString& ComponentClassPath,
+        const FString& ComponentName,
+        const FString& ParentComponentName);
+
+    // Sets a property on the Blueprint's class-default object (Class Defaults panel) by reflection import
+    // text (same mechanism as statetree.set_node_property). Returns true on success.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Blueprint", meta = (DevelopmentOnly))
+    static bool SetClassDefaultProperty(UBlueprint* Blueprint, const FString& PropertyName, const FString& ValueText);
+
+    // Adds an implemented interface to the Blueprint. InterfaceClassPath is a native interface
+    // (e.g. "/Script/Module.UMyInterface") or a BP interface's generated class
+    // (e.g. "/Game/BPI_Thing.BPI_Thing_C"). Returns true on success.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Blueprint", meta = (DevelopmentOnly))
+    static bool ImplementInterface(UBlueprint* Blueprint, const FString& InterfaceClassPath);
+
+    // Adds an input (bIsOutput=false) or output (bIsOutput=true) parameter to a function graph's
+    // entry/result node. TypeString/SubTypeObjectPath/bIsArray as in AddMemberVariable. Works for both
+    // normal function graphs and Blueprint Interface function graphs (creates a result node if an output
+    // is added and none exists yet). Returns the created pin's name, or empty on failure.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Blueprint", meta = (DevelopmentOnly))
+    static FString AddFunctionParam(
+        UBlueprint* Blueprint,
+        const FString& FunctionGraphName,
+        const FString& ParamName,
+        const FString& TypeString,
+        const FString& SubTypeObjectPath,
+        bool bIsArray,
+        bool bIsOutput);
+
+    // ---- Blueprint authoring: graph nodes ----
+
+    // Spawns a K2 node of an arbitrary class (e.g. "/Script/BlueprintGraph.K2Node_CustomEvent") into the
+    // named graph and allocates its default pins. For call-function / variable get / variable set prefer the
+    // dedicated adders (they also set the reference). Post-spawn, set node specifics via reflection and wire
+    // with ConnectPins. Returns the new node's name, or empty on failure.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static FString AddK2Node(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& NodeClassPath,
+        int32 PosX,
+        int32 PosY);
+
+    // Adds a K2Node_VariableSet (self-context) for PropertyName. Mirror of AddVariableGetNode.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static FString AddVariableSetNode(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& PropertyName,
+        int32 PosX,
+        int32 PosY);
+
+    // Sets a node input pin's literal default value through the graph schema (what typing into the pin does).
+    // Returns true on success (false if the graph/node/pin is missing).
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static bool SetPinDefaultValue(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& NodeName,
+        const FString& PinName,
+        const FString& Value);
+
     // Resolves GraphName against Blueprint's top-level graphs, then (for AnimBlueprints) falls
     // back to nested AnimGraph graphs: state machine inner graphs, state bound graphs, and
     // transition rule graphs. Public so other command handlers (e.g. blueprint.get_graph_nodes)
@@ -229,6 +317,9 @@ public:
 private:
     static UEdGraphNode* FindNodeByName(UEdGraph* Graph, const FString& NodeName);
     static UEdGraphPin* FindPinByName(UEdGraphNode* Node, const FString& PinName);
+
+    // Builds an FEdGraphPinType from a type string (see AddMemberVariable). Returns false if unrecognized.
+    static bool MakePinTypeFromString(const FString& TypeString, const FString& SubTypeObjectPath, bool bIsArray, FEdGraphPinType& OutPinType);
 
     // Finds a state (by GetStateName()) in a state machine's inner graph.
     static class UAnimStateNodeBase* FindStateByName(class UAnimGraphNode_StateMachineBase* MachineNode, const FString& StateName);

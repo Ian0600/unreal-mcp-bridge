@@ -108,14 +108,8 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         return conn.call("material.set_static_switch_param",
                          _param(instance_path, parameter_name, association, value=value))
 
-    @mcp.tool()
-    def material_set_parameter_override(
-        instance_path: str, parameter_name: str, override: bool,
-        association: str | None = None,
-    ) -> dict:
-        """Enable/disable a parameter override on a Material Instance Constant."""
-        return conn.call("material.set_parameter_override",
-                         _param(instance_path, parameter_name, association, override=override))
+    # NOTE (UE 5.3): material_set_parameter_override is intentionally absent — the engine's
+    # UMaterialEditingLibrary has no SetMaterialInstanceParameterOverride until 5.8.
 
     @mcp.tool()
     def material_set_instance_parent(instance_path: str, parent_path: str) -> dict:
@@ -205,27 +199,8 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
             "property": property, "from_output": from_output,
         })
 
-    @mcp.tool()
-    def material_disconnect_expression(
-        to_guid: str, to_input: str,
-        material_path: str | None = None,
-        function_path: str | None = None,
-    ) -> dict:
-        """Clear an input pin of an expression node."""
-        if not (to_guid and to_input):
-            raise ValueError("to_guid and to_input are required")
-        params = _graph_host(material_path, function_path)
-        params.update({"to_guid": to_guid, "to_input": to_input})
-        return conn.call("material.disconnect_expression", params)
-
-    @mcp.tool()
-    def material_disconnect_property(material_path: str, property: str) -> dict:
-        """Clear a material property input (e.g. 'BaseColor')."""
-        if not (material_path and property):
-            raise ValueError("material_path and property are required")
-        return conn.call("material.disconnect_property", {
-            "material_path": material_path, "property": property,
-        })
+    # NOTE (UE 5.3): material_disconnect_expression / material_disconnect_property are absent —
+    # DisconnectMaterialExpressions / DisconnectMaterialProperty were added to the engine in 5.8.
 
     @mcp.tool()
     def material_delete_expression(
@@ -248,12 +223,7 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """Delete every expression node in a material or function graph."""
         return conn.call("material.delete_all_expressions", _graph_host(material_path, function_path))
 
-    @mcp.tool()
-    def material_delete_unused_expressions(material_path: str) -> dict:
-        """Delete expression nodes unreachable from any material output."""
-        if not material_path:
-            raise ValueError("material_path is required")
-        return conn.call("material.delete_unused_expressions", {"material_path": material_path})
+    # NOTE (UE 5.3): material_delete_unused_expressions is absent — DeleteUnusedExpressions was added in 5.8.
 
     @mcp.tool()
     def material_layout_expressions(

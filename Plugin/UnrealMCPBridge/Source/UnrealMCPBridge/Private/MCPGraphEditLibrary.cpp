@@ -9,9 +9,16 @@
 #include "K2Node_CallFunction.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_VariableGet.h"
+#include "K2Node_VariableSet.h"
+#include "K2Node_FunctionEntry.h"
+#include "K2Node_FunctionResult.h"
+#include "UObject/Interface.h"
 
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+#include "Engine/SimpleConstructionScript.h"
+#include "Engine/SCS_Node.h"
+#include "Components/ActorComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
@@ -418,7 +425,7 @@ bool UMCPGraphEditLibrary::RemoveOrphanedGraph(
                 Found = G;
             }
         }
-    }, EGetObjectsFlags::IncludeNestedObjects);
+    }, /*bIncludeNestedObjects=*/true); // UE 5.3: ForEachObjectWithOuter takes a bool, not EGetObjectsFlags
 
     if (!Found)
     {
@@ -507,9 +514,11 @@ FString UMCPGraphEditLibrary::AddAnimState(
     }
 
     UAnimationStateMachineGraph* InnerGraph = MachineNode->EditorStateMachineGraph;
-    const bool bIsFirstState = InnerGraph->EntryNode
-        && InnerGraph->EntryNode->GetOutputPin()
-        && InnerGraph->EntryNode->GetOutputPin()->LinkedTo.Num() == 0;
+    // UE 5.3: UAnimStateEntryNode has no GetOutputPin() (it derives from UEdGraphNode, not
+    // UAnimStateNodeBase). Its single output pin is created in AllocateDefaultPins, so use Pins[0].
+    UEdGraphPin* EntryOutPin = (InnerGraph->EntryNode && InnerGraph->EntryNode->Pins.Num() > 0)
+        ? InnerGraph->EntryNode->Pins[0] : nullptr;
+    const bool bIsFirstState = EntryOutPin && EntryOutPin->LinkedTo.Num() == 0;
 
     UAnimStateNode* StateNode = NewObject<UAnimStateNode>(InnerGraph);
     InnerGraph->AddNode(StateNode, false, false);
@@ -528,9 +537,9 @@ FString UMCPGraphEditLibrary::AddAnimState(
         StateNode->BoundGraph->Rename(*StateName, nullptr, REN_DontCreateRedirectors);
     }
 
-    if (bIsFirstState && InnerGraph->EntryNode && InnerGraph->EntryNode->GetOutputPin())
+    if (bIsFirstState && EntryOutPin)
     {
-        InnerGraph->EntryNode->GetOutputPin()->MakeLinkTo(StateNode->GetInputPin());
+        EntryOutPin->MakeLinkTo(StateNode->GetInputPin());
     }
 
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
@@ -893,5 +902,274 @@ FString UMCPGraphEditLibrary::AddAnimTransition(
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
     AnimBlueprint->MarkPackageDirty();
     return TransNode->GetName();
+}
+
+// ---- Blueprint authoring: structure ----
+
+bool UMCPGraphEditLibrary::MakePinTypeFromString(const FString& TypeString, const FString& SubTypeObjectPath, bool bIsArray, FEdGraphPinType& OutPinType)
+{
+    OutPinType = FEdGraphPinType();
+    const FString T = TypeString.TrimStartAndEnd().ToLower();
+
+    auto LoadSub = [&SubTypeObjectPath]() -> UObject* { return SubTypeObjectPath.IsEmpty() ? nullptr : LoadObject<UObject>(nullptr, *SubTypeObjectPath); };
+
+    if (T == TEXT("bool") || T == TEXT("boolean")) { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Boolean; }
+    else if (T == TEXT("byte"))                    { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Byte; }
+    else if (T == TEXT("int") || T == TEXT("int32") || T == TEXT("integer")) { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Int; }
+    else if (T == TEXT("int64"))                   { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Int64; }
+    else if (T == TEXT("float") || T == TEXT("double") || T == TEXT("real")) { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Real; OutPinType.PinSubCategory = UEdGraphSchema_K2::PC_Double; }
+    else if (T == TEXT("string"))                  { OutPinType.PinCategory = UEdGraphSchema_K2::PC_String; }
+    else if (T == TEXT("name"))                    { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Name; }
+    else if (T == TEXT("text"))                    { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Text; }
+    else if (T == TEXT("vector"))                  { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct; OutPinType.PinSubCategoryObject = TBaseStructure<FVector>::Get(); }
+    else if (T == TEXT("rotator"))                 { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct; OutPinType.PinSubCategoryObject = TBaseStructure<FRotator>::Get(); }
+    else if (T == TEXT("transform"))               { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct; OutPinType.PinSubCategoryObject = TBaseStructure<FTransform>::Get(); }
+    else if (T == TEXT("object") || T == TEXT("class"))
+    {
+        UClass* SubClass = Cast<UClass>(LoadSub());
+        if (!SubClass) { SubClass = UObject::StaticClass(); }
+        OutPinType.PinCategory = (T == TEXT("class")) ? UEdGraphSchema_K2::PC_Class : UEdGraphSchema_K2::PC_Object;
+        OutPinType.PinSubCategoryObject = SubClass;
+    }
+    else if (T == TEXT("struct"))                  { UScriptStruct* S = Cast<UScriptStruct>(LoadSub()); if (!S) return false; OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct; OutPinType.PinSubCategoryObject = S; }
+    else if (T == TEXT("enum"))                    { UEnum* E = Cast<UEnum>(LoadSub()); if (!E) return false; OutPinType.PinCategory = UEdGraphSchema_K2::PC_Byte; OutPinType.PinSubCategoryObject = E; }
+    else
+    {
+        // Fallback: interpret TypeString itself as a struct / class / enum object path.
+        if (UScriptStruct* S = LoadObject<UScriptStruct>(nullptr, *TypeString)) { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Struct; OutPinType.PinSubCategoryObject = S; }
+        else if (UClass* C = LoadObject<UClass>(nullptr, *TypeString))          { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Object; OutPinType.PinSubCategoryObject = C; }
+        else if (UEnum* En = LoadObject<UEnum>(nullptr, *TypeString))           { OutPinType.PinCategory = UEdGraphSchema_K2::PC_Byte;   OutPinType.PinSubCategoryObject = En; }
+        else { return false; }
+    }
+
+    OutPinType.ContainerType = bIsArray ? EPinContainerType::Array : EPinContainerType::None;
+    return true;
+}
+
+bool UMCPGraphEditLibrary::AddMemberVariable(UBlueprint* Blueprint, const FString& VarName, const FString& TypeString, const FString& SubTypeObjectPath, bool bIsArray, const FString& DefaultValue)
+{
+    if (!Blueprint || VarName.IsEmpty()) return false;
+
+    FEdGraphPinType PinType;
+    if (!MakePinTypeFromString(TypeString, SubTypeObjectPath, bIsArray, PinType))
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddMemberVariable: unrecognized type '%s' (subtype '%s')"), *TypeString, *SubTypeObjectPath);
+        return false;
+    }
+
+    const bool bOk = FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*VarName), PinType, DefaultValue);
+    if (bOk) { Blueprint->MarkPackageDirty(); }
+    return bOk;
+}
+
+FString UMCPGraphEditLibrary::AddFunctionGraph(UBlueprint* Blueprint, const FString& FunctionName)
+{
+    if (!Blueprint || FunctionName.IsEmpty()) return FString();
+
+    UEdGraph* NewGraph = FBlueprintEditorUtils::CreateNewGraph(
+        Blueprint, FName(*FunctionName), UEdGraph::StaticClass(), UEdGraphSchema_K2::StaticClass());
+    if (!NewGraph) return FString();
+
+    // SignatureType=UClass, no signature source -> a fresh user function with editable entry/result nodes.
+    FBlueprintEditorUtils::AddFunctionGraph<UClass>(Blueprint, NewGraph, /*bIsUserCreated=*/true, static_cast<UClass*>(nullptr));
+    Blueprint->MarkPackageDirty();
+    return NewGraph->GetName();
+}
+
+FString UMCPGraphEditLibrary::AddComponent(UBlueprint* Blueprint, const FString& ComponentClassPath, const FString& ComponentName, const FString& ParentComponentName)
+{
+    if (!Blueprint || !Blueprint->SimpleConstructionScript) return FString();
+
+    UClass* CompClass = LoadObject<UClass>(nullptr, *ComponentClassPath);
+    if (!CompClass || !CompClass->IsChildOf(UActorComponent::StaticClass()))
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddComponent: '%s' is not a UActorComponent class"), *ComponentClassPath);
+        return FString();
+    }
+
+    USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript;
+    USCS_Node* NewNode = SCS->CreateNode(CompClass, FName(*ComponentName));
+    if (!NewNode) return FString();
+
+    USCS_Node* ParentNode = nullptr;
+    if (!ParentComponentName.IsEmpty())
+    {
+        for (USCS_Node* N : SCS->GetAllNodes())
+        {
+            if (N && N->GetVariableName() == FName(*ParentComponentName)) { ParentNode = N; break; }
+        }
+    }
+
+    if (ParentNode) { ParentNode->AddChildNode(NewNode); }
+    else            { SCS->AddNode(NewNode); }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return NewNode->GetVariableName().ToString();
+}
+
+bool UMCPGraphEditLibrary::SetClassDefaultProperty(UBlueprint* Blueprint, const FString& PropertyName, const FString& ValueText)
+{
+    if (!Blueprint) return false;
+    UClass* GenClass = Blueprint->GeneratedClass;
+    if (!GenClass) return false;
+    UObject* CDO = GenClass->GetDefaultObject();
+    if (!CDO) return false;
+
+    FProperty* Prop = GenClass->FindPropertyByName(FName(*PropertyName));
+    if (!Prop)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("SetClassDefaultProperty: property '%s' not found on %s"), *PropertyName, *GenClass->GetName());
+        return false;
+    }
+
+    void* Addr = Prop->ContainerPtrToValuePtr<void>(CDO);
+    CDO->Modify();
+    const TCHAR* Result = Prop->ImportText_Direct(*ValueText, Addr, CDO, PPF_None);
+    if (Result == nullptr) return false;
+
+    Blueprint->MarkPackageDirty();
+    return true;
+}
+
+// ---- Blueprint authoring: graph nodes ----
+
+FString UMCPGraphEditLibrary::AddK2Node(UBlueprint* Blueprint, const FString& GraphName, const FString& NodeClassPath, int32 PosX, int32 PosY)
+{
+    if (!Blueprint) return FString();
+    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    if (!Graph) { UE_LOG(LogMCPBridge, Warning, TEXT("AddK2Node: graph '%s' not found"), *GraphName); return FString(); }
+
+    UClass* NodeClass = LoadObject<UClass>(nullptr, *NodeClassPath);
+    if (!NodeClass || !NodeClass->IsChildOf(UEdGraphNode::StaticClass()))
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddK2Node: '%s' is not a UEdGraphNode class"), *NodeClassPath);
+        return FString();
+    }
+
+    UEdGraphNode* Node = NewObject<UEdGraphNode>(Graph, NodeClass);
+    if (!Node) return FString();
+    Graph->AddNode(Node, /*bFromUI*/ false, /*bSelectNewNode*/ false);
+    Node->CreateNewGuid();
+    Node->NodePosX = PosX;
+    Node->NodePosY = PosY;
+    Node->PostPlacedNewNode();
+    if (Node->Pins.Num() == 0) { Node->AllocateDefaultPins(); }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return Node->GetName();
+}
+
+FString UMCPGraphEditLibrary::AddVariableSetNode(UBlueprint* Blueprint, const FString& GraphName, const FString& PropertyName, int32 PosX, int32 PosY)
+{
+    if (!Blueprint) return FString();
+    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    if (!Graph) return FString();
+
+    UClass* InstanceClass = Blueprint->GeneratedClass ? Blueprint->GeneratedClass : Blueprint->ParentClass;
+    FProperty* Prop = InstanceClass ? InstanceClass->FindPropertyByName(FName(*PropertyName)) : nullptr;
+    if (!Prop)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddVariableSetNode: property '%s' not found"), *PropertyName);
+        return FString();
+    }
+
+    UK2Node_VariableSet* Node = NewObject<UK2Node_VariableSet>(Graph);
+    Graph->AddNode(Node, /*bFromUI*/ false, /*bSelectNewNode*/ false);
+    Node->CreateNewGuid();
+    Node->VariableReference.SetSelfMember(Prop->GetFName());
+    Node->NodePosX = PosX;
+    Node->NodePosY = PosY;
+    Node->AllocateDefaultPins();
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return Node->GetName();
+}
+
+bool UMCPGraphEditLibrary::SetPinDefaultValue(UBlueprint* Blueprint, const FString& GraphName, const FString& NodeName, const FString& PinName, const FString& Value)
+{
+    if (!Blueprint) return false;
+    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    if (!Graph) return false;
+    UEdGraphNode* Node = FindNodeByName(Graph, NodeName);
+    if (!Node) return false;
+    UEdGraphPin* Pin = FindPinByName(Node, PinName);
+    if (!Pin) return false;
+
+    const UEdGraphSchema* Schema = Graph->GetSchema();
+    if (!Schema) return false;
+    Schema->TrySetDefaultValue(*Pin, Value);
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return true;
+}
+
+// ---- Blueprint authoring: interfaces & function signatures ----
+
+bool UMCPGraphEditLibrary::ImplementInterface(UBlueprint* Blueprint, const FString& InterfaceClassPath)
+{
+    if (!Blueprint) return false;
+    UClass* IfaceClass = LoadObject<UClass>(nullptr, *InterfaceClassPath);
+    if (!IfaceClass)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("ImplementInterface: could not load interface class '%s'"), *InterfaceClassPath);
+        return false;
+    }
+    const bool bOk = FBlueprintEditorUtils::ImplementNewInterface(Blueprint, IfaceClass->GetClassPathName());
+    if (bOk) { Blueprint->MarkPackageDirty(); }
+    return bOk;
+}
+
+FString UMCPGraphEditLibrary::AddFunctionParam(UBlueprint* Blueprint, const FString& FunctionGraphName, const FString& ParamName, const FString& TypeString, const FString& SubTypeObjectPath, bool bIsArray, bool bIsOutput)
+{
+    if (!Blueprint || ParamName.IsEmpty()) return FString();
+
+    UEdGraph* Graph = FindGraphByName(Blueprint, FunctionGraphName);
+    if (!Graph) { UE_LOG(LogMCPBridge, Warning, TEXT("AddFunctionParam: function graph '%s' not found"), *FunctionGraphName); return FString(); }
+
+    FEdGraphPinType PinType;
+    if (!MakePinTypeFromString(TypeString, SubTypeObjectPath, bIsArray, PinType))
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddFunctionParam: unrecognized type '%s'"), *TypeString);
+        return FString();
+    }
+
+    // A function INPUT param is an OUTPUT pin on the entry node; a function OUTPUT param is an INPUT pin
+    // on the result node. Locate (or, for outputs, create) the right editable node.
+    UK2Node_EditablePinBase* Target = nullptr;
+    if (bIsOutput)
+    {
+        for (UEdGraphNode* N : Graph->Nodes) { if (UK2Node_FunctionResult* R = Cast<UK2Node_FunctionResult>(N)) { Target = R; break; } }
+        if (!Target)
+        {
+            UK2Node_FunctionEntry* Entry = nullptr;
+            for (UEdGraphNode* N : Graph->Nodes) { if (UK2Node_FunctionEntry* E = Cast<UK2Node_FunctionEntry>(N)) { Entry = E; break; } }
+            UK2Node_FunctionResult* NewResult = NewObject<UK2Node_FunctionResult>(Graph);
+            Graph->AddNode(NewResult, /*bFromUI*/ false, /*bSelectNewNode*/ false);
+            NewResult->CreateNewGuid();
+            NewResult->NodePosX = Entry ? Entry->NodePosX + 400 : 400;
+            NewResult->NodePosY = Entry ? Entry->NodePosY : 0;
+            NewResult->PostPlacedNewNode();
+            NewResult->AllocateDefaultPins();
+            Target = NewResult;
+        }
+    }
+    else
+    {
+        for (UEdGraphNode* N : Graph->Nodes) { if (UK2Node_FunctionEntry* E = Cast<UK2Node_FunctionEntry>(N)) { Target = E; break; } }
+    }
+
+    if (!Target) { UE_LOG(LogMCPBridge, Warning, TEXT("AddFunctionParam: no entry/result node in '%s'"), *FunctionGraphName); return FString(); }
+
+    const EEdGraphPinDirection Dir = bIsOutput ? EGPD_Input : EGPD_Output;
+    UEdGraphPin* NewPin = Target->CreateUserDefinedPin(FName(*ParamName), PinType, Dir, /*bUseUniqueName=*/true);
+    if (!NewPin) { UE_LOG(LogMCPBridge, Warning, TEXT("AddFunctionParam: CreateUserDefinedPin failed for '%s'"), *ParamName); return FString(); }
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return NewPin->PinName.ToString();
 }
 

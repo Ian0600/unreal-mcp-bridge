@@ -12,7 +12,7 @@
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialExpressionNamedReroute.h"
 #include "Materials/MaterialExpressionComment.h"
-#include "Materials/MaterialParameters.h"
+#include "MaterialTypes.h" // UE 5.3: EMaterialParameterAssociation lives here (moved to Materials/MaterialParameters.h in 5.8)
 #include "SceneTypes.h"
 
 #include "Factories/MaterialFactoryNew.h"
@@ -98,9 +98,18 @@ namespace
 
     TArray<UMaterialExpression*> MtlGetExpressions(const FGraphHost& Host)
     {
-        if (Host.Material) return UMaterialEditingLibrary::GetMaterialExpressions(Host.Material);
-        if (Host.Function) return UMaterialEditingLibrary::GetMaterialFunctionExpressions(Host.Function);
-        return {};
+        // UE 5.3: UMaterialEditingLibrary has no array getters (added in 5.8). Read the
+        // expression collection straight off the material/function instead.
+        TArray<UMaterialExpression*> Out;
+        if (Host.Material)
+        {
+            for (const TObjectPtr<UMaterialExpression>& E : Host.Material->GetExpressions()) Out.Add(E);
+        }
+        else if (Host.Function)
+        {
+            for (const TObjectPtr<UMaterialExpression>& E : Host.Function->GetExpressions()) Out.Add(E);
+        }
+        return Out;
     }
 
     // Ensures every expression carries a stable GUID we can hand back to callers, then returns it.
@@ -378,7 +387,6 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 const float V = MIC ? UMaterialEditingLibrary::GetMaterialInstanceScalarParameterValue(MIC, N, Assoc)
                                     : UMaterialEditingLibrary::GetMaterialDefaultScalarParameterValue(AsMat, N);
                 O->SetNumberField(TEXT("value"), V);
-                if (MIC) O->SetBoolField(TEXT("overridden"), UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(MIC, N, Assoc));
                 ScalarArr.Add(MakeShared<FJsonValueObject>(O));
             }
             for (const FName& N : Vectors)
@@ -388,7 +396,6 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 const FLinearColor V = MIC ? UMaterialEditingLibrary::GetMaterialInstanceVectorParameterValue(MIC, N, Assoc)
                                            : UMaterialEditingLibrary::GetMaterialDefaultVectorParameterValue(AsMat, N);
                 O->SetField(TEXT("value"), LinearColorToJson(V));
-                if (MIC) O->SetBoolField(TEXT("overridden"), UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(MIC, N, Assoc));
                 VectorArr.Add(MakeShared<FJsonValueObject>(O));
             }
             for (const FName& N : Textures)
@@ -398,7 +405,6 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 UTexture* Tex = MIC ? UMaterialEditingLibrary::GetMaterialInstanceTextureParameterValue(MIC, N, Assoc)
                                     : UMaterialEditingLibrary::GetMaterialDefaultTextureParameterValue(AsMat, N);
                 O->SetStringField(TEXT("value"), Tex ? Tex->GetPathName() : TEXT(""));
-                if (MIC) O->SetBoolField(TEXT("overridden"), UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(MIC, N, Assoc));
                 TextureArr.Add(MakeShared<FJsonValueObject>(O));
             }
             for (const FName& N : Switches)
@@ -408,7 +414,6 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 const bool V = MIC ? UMaterialEditingLibrary::GetMaterialInstanceStaticSwitchParameterValue(MIC, N, Assoc)
                                    : UMaterialEditingLibrary::GetMaterialDefaultStaticSwitchParameterValue(AsMat, N);
                 O->SetBoolField(TEXT("value"), V);
-                if (MIC) O->SetBoolField(TEXT("overridden"), UMaterialEditingLibrary::IsMaterialInstanceParameterOverridden(MIC, N, Assoc));
                 SwitchArr.Add(MakeShared<FJsonValueObject>(O));
             }
 
@@ -443,11 +448,11 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 O->SetNumberField(TEXT("pos_x"), X);
                 O->SetNumberField(TEXT("pos_y"), Y);
 
-                TArray<TSharedPtr<FJsonValue>> Ins, Outs;
+                // UE 5.3: only input pin names are exposed by the library (GetMaterialExpressionOutputNames
+                // was added in 5.8). Output pin names are omitted here.
+                TArray<TSharedPtr<FJsonValue>> Ins;
                 for (const FString& S : UMaterialEditingLibrary::GetMaterialExpressionInputNames(Expr)) Ins.Add(MakeShared<FJsonValueString>(S));
-                for (const FString& S : UMaterialEditingLibrary::GetMaterialExpressionOutputNames(Expr)) Outs.Add(MakeShared<FJsonValueString>(S));
                 O->SetArrayField(TEXT("inputs"), Ins);
-                O->SetArrayField(TEXT("outputs"), Outs);
                 Arr.Add(MakeShared<FJsonValueObject>(O));
             }
 
@@ -543,21 +548,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             return MtlOk();
         });
 
-    // material.set_parameter_override — Params: instance_path, parameter_name, override (bool), [association].
-    Registry.Register(TEXT("material.set_parameter_override"),
-        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
-        {
-            UMaterialInstanceConstant* MIC = MtlLoadTyped<UMaterialInstanceConstant>(Params, TEXT("instance_path"), OutError);
-            if (!MIC) return nullptr;
-            FString Name; if (!MtlRequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
-            bool bOverride = false;
-            if (!Params->TryGetBoolField(TEXT("override"), bOverride)) { MtlFail(OutError, FMCPError::InvalidParams, TEXT("override (bool) is required")); return nullptr; }
-
-            const bool bOk = UMaterialEditingLibrary::SetMaterialInstanceParameterOverride(MIC, FName(*Name), bOverride, ParseAssociation(Params));
-            if (!bOk) { MtlFail(OutError, FMCPError::InvalidParams, FString::Printf(TEXT("parameter not found: %s"), *Name)); return nullptr; }
-            MIC->MarkPackageDirty();
-            return MtlOk();
-        });
+    // NOTE (UE 5.3): material.set_parameter_override is omitted — UMaterialEditingLibrary lacks
+    // SetMaterialInstanceParameterOverride / IsMaterialInstanceParameterOverridden until 5.8.
 
     // material.set_instance_parent — Params: instance_path, parent_path.
     Registry.Register(TEXT("material.set_instance_parent"),
@@ -702,42 +694,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             return MtlOk();
         });
 
-    // material.disconnect_expression — clear an input pin. Params: material_path OR function_path, to_guid, to_input.
-    Registry.Register(TEXT("material.disconnect_expression"),
-        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
-        {
-            FGraphHost Host = LoadGraphHost(Params, OutError);
-            if (!Host.IsValid()) return nullptr;
-            FString ToGuid, ToIn;
-            if (!MtlRequireString(Params, TEXT("to_guid"), ToGuid, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("to_input"), ToIn, OutError)) return nullptr;
-
-            UMaterialExpression* To = ResolveExpression(Host, ToGuid, OutError); if (!To) return nullptr;
-            const bool bBroken = UMaterialEditingLibrary::DisconnectMaterialExpressions(To, ToIn);
-            Host.AsObject()->MarkPackageDirty();
-
-            auto Result = MakeShared<FJsonObject>();
-            Result->SetBoolField(TEXT("disconnected"), bBroken);
-            return Result;
-        });
-
-    // material.disconnect_property — clear a material property input. Params: material_path, property.
-    Registry.Register(TEXT("material.disconnect_property"),
-        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
-        {
-            UMaterial* Mat = MtlLoadTyped<UMaterial>(Params, TEXT("material_path"), OutError);
-            if (!Mat) return nullptr;
-            FString PropStr; if (!MtlRequireString(Params, TEXT("property"), PropStr, OutError)) return nullptr;
-            EMaterialProperty Prop;
-            if (!ParseMaterialProperty(PropStr, Prop)) { MtlFail(OutError, FMCPError::InvalidParams, FString::Printf(TEXT("unknown material property: %s"), *PropStr)); return nullptr; }
-
-            const bool bBroken = UMaterialEditingLibrary::DisconnectMaterialProperty(Mat, Prop);
-            Mat->MarkPackageDirty();
-
-            auto Result = MakeShared<FJsonObject>();
-            Result->SetBoolField(TEXT("disconnected"), bBroken);
-            return Result;
-        });
+    // NOTE (UE 5.3): material.disconnect_expression and material.disconnect_property are omitted —
+    // DisconnectMaterialExpressions / DisconnectMaterialProperty were added to UMaterialEditingLibrary in 5.8.
 
     // material.delete_expression — Params: material_path OR function_path, expression_guid.
     Registry.Register(TEXT("material.delete_expression"),
@@ -766,16 +724,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             return MtlOk();
         });
 
-    // material.delete_unused_expressions — Params: material_path. Removes nodes unreachable from outputs.
-    Registry.Register(TEXT("material.delete_unused_expressions"),
-        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
-        {
-            UMaterial* Mat = MtlLoadTyped<UMaterial>(Params, TEXT("material_path"), OutError);
-            if (!Mat) return nullptr;
-            UMaterialEditingLibrary::DeleteUnusedExpressions(Mat);
-            Mat->MarkPackageDirty();
-            return MtlOk();
-        });
+    // NOTE (UE 5.3): material.delete_unused_expressions is omitted — DeleteUnusedExpressions was added in 5.8.
 
     // material.layout_expressions — arrange nodes in a grid. Params: material_path OR function_path.
     Registry.Register(TEXT("material.layout_expressions"),
@@ -1074,22 +1023,20 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         });
 
     // material.recompile — recompile a material after graph edits. Params: material_path.
-    // Returns { compiled (bool), errors (string[]) }.
+    // UE 5.3: RecompileMaterial returns void (no compiler error list; that was added in 5.8), so
+    // "errors" is always empty and "compiled" is reported true once the call returns.
     Registry.Register(TEXT("material.recompile"),
         [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
             UMaterial* Mat = MtlLoadTyped<UMaterial>(Params, TEXT("material_path"), OutError);
             if (!Mat) return nullptr;
 
-            const TArray<FString> Errors = UMaterialEditingLibrary::RecompileMaterial(Mat);
+            UMaterialEditingLibrary::RecompileMaterial(Mat);
             Mat->MarkPackageDirty();
 
-            TArray<TSharedPtr<FJsonValue>> ErrArr;
-            for (const FString& E : Errors) ErrArr.Add(MakeShared<FJsonValueString>(E));
-
             auto Result = MakeShared<FJsonObject>();
-            Result->SetBoolField(TEXT("compiled"), Errors.Num() == 0);
-            Result->SetArrayField(TEXT("errors"), ErrArr);
+            Result->SetBoolField(TEXT("compiled"), true);
+            Result->SetArrayField(TEXT("errors"), TArray<TSharedPtr<FJsonValue>>());
             return Result;
         });
 

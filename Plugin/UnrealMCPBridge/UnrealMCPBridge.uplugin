@@ -1,9 +1,9 @@
 {
   "FileVersion": 3,
   "Version": 1,
-  "VersionName": "0.1.0",
-  "FriendlyName": "Unreal MCP Bridge",
-  "Description": "JSON-RPC 2.0 bridge between Unreal Editor and MCP clients",
+  "VersionName": "0.1.0-ue5.3",
+  "FriendlyName": "Unreal MCP Bridge (UE 5.3)",
+  "Description": "JSON-RPC 2.0 bridge between Unreal Editor and MCP clients. UE 5.3 port: camera rig/variable commands removed (new Gameplay Camera System is unavailable in 5.3).",
   "Category": "Editor",
   "CreatedBy": "YomenStyle",
   "EnabledByDefault": true,
@@ -27,10 +27,6 @@
     },
     {
       "Name": "StateTree",
-      "Enabled": true
-    },
-    {
-      "Name": "GameplayCameras",
       "Enabled": true
     }
   ]

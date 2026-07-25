@@ -45,11 +45,17 @@ public class UnrealMCPBridge : ModuleRules
             "AnimGraph",
             "AnimGraphRuntime",
             // StateTree authoring (states/evaluators/tasks/transitions/bindings/compile)
+            // UE 5.3: bindings use FStateTreePropertyPath (StateTreeModule); no PropertyBindingUtils module.
             "StateTreeModule",
             "StateTreeEditorModule",
-            "PropertyBindingUtils",
-            // Gameplay Camera System rig editing (node inspection + property tuning)
-            "GameplayCameras",
+            // UE 5.3: FInstancedStruct::InitializeAs lives in the StructUtils module (merged into
+            // CoreUObject only in 5.5+). Needed to link StateTree node creation in AddNodeToArray.
+            "StructUtils",
+            // BehaviorTree/Blackboard authoring (behaviortree.* commands): runtime nodes + blackboard
+            // (AIModule), the editor graph (BehaviorTreeEditor), and its AIGraph base.
+            "AIModule",
+            "AIGraph",
+            "BehaviorTreeEditor",
         });
     }
 }

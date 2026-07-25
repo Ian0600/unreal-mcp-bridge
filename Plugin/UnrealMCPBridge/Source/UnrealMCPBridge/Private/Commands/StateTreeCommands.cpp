@@ -8,9 +8,13 @@
 #include "StateTreeEditorData.h"
 #include "StateTreeEditorNode.h"
 #include "StateTreeCompilerLog.h"
-#include "StateTreeEditingSubsystem.h"
 #include "StateTreeTypes.h"
-#include "PropertyBindingPath.h"
+// UE 5.3 authoring APIs (the 5.5+ StateTreeEditingSubsystem and PropertyBindingUtils module do not exist here)
+#include "StateTreeCompiler.h"                 // FStateTreeCompiler
+#include "StateTreeNodeBase.h"                 // FStateTreeNodeBase::GetInstanceDataType
+#include "StateTreePropertyBindings.h"         // FStateTreePropertyPath
+#include "StateTreeDelegates.h"                // UE::StateTree::Delegates::OnPostCompile
+#include "Serialization/ArchiveObjectCrc32.h"  // FArchiveObjectCrc32 (editor-data hash)
 
 namespace
 {
@@ -100,12 +104,22 @@ namespace
         return EStateTreeTransitionTrigger::OnTick; // default: evaluate every tick
     }
 
-    // Adds an editor node (task/eval) of the given struct into an array, returns its new GUID (or invalid).
-    FGuid AddNodeToArray(TArray<FStateTreeEditorNode>& Array, UObject* Outer, const UScriptStruct* Struct)
+    // Adds an editor node (task/eval/condition) of the given struct into an array, returns its new GUID.
+    // UE 5.3: FStateTreeEditorNode has no unified InitializeAs(Outer, Struct). Initialize the node struct
+    // (FInstancedStruct Node) directly, then allocate its instance data from the node's declared type
+    // (GetInstanceDataType is virtual on FStateTreeNodeBase). Mirrors UStateTreeEditorData::AddEvaluator<T>.
+    FGuid AddNodeToArray(TArray<FStateTreeEditorNode>& Array, const UScriptStruct* Struct)
     {
         FStateTreeEditorNode& Node = Array.AddDefaulted_GetRef();
-        Node.InitializeAs(Outer, Struct);
         Node.ID = FGuid::NewGuid();
+        Node.Node.InitializeAs(Struct);
+        if (const FStateTreeNodeBase* NodePtr = Node.Node.GetPtr<FStateTreeNodeBase>())
+        {
+            if (const UScriptStruct* InstanceType = Cast<const UScriptStruct>(NodePtr->GetInstanceDataType()))
+            {
+                Node.Instance.InitializeAs(InstanceType);
+            }
+        }
         return Node.ID;
     }
 
@@ -191,7 +205,7 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             const UScriptStruct* Struct = FindNodeStruct(StructPath);
             if (!Struct) { OutError.Code = MCPProtocol::FMCPError::InvalidParams; OutError.Message = FString::Printf(TEXT("struct not found: %s"), *StructPath); return nullptr; }
 
-            const FGuid Id = AddNodeToArray(Ed->Evaluators, Ed, Struct);
+            const FGuid Id = AddNodeToArray(Ed->Evaluators, Struct);
             Tree->MarkPackageDirty();
 
             auto Result = MakeShared<FJsonObject>();
@@ -217,7 +231,7 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             const UScriptStruct* Struct = FindNodeStruct(StructPath);
             if (!Struct) { OutError.Code = MCPProtocol::FMCPError::InvalidParams; OutError.Message = FString::Printf(TEXT("struct not found: %s"), *StructPath); return nullptr; }
 
-            const FGuid Id = AddNodeToArray(State->Tasks, Ed, Struct);
+            const FGuid Id = AddNodeToArray(State->Tasks, Struct);
             Tree->MarkPackageDirty();
 
             auto Result = MakeShared<FJsonObject>();
@@ -266,8 +280,8 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 
             FGuid SrcGuid, TgtGuid; FGuid::Parse(SrcId, SrcGuid); FGuid::Parse(TgtId, TgtGuid);
 
-            FPropertyBindingPath Source; Source.SetStructID(SrcGuid);
-            FPropertyBindingPath Target; Target.SetStructID(TgtGuid);
+            FStateTreePropertyPath Source; Source.SetStructID(SrcGuid);
+            FStateTreePropertyPath Target; Target.SetStructID(TgtGuid);
             if (!Source.FromString(SrcPath) || !Target.FromString(TgtPath))
             {
                 OutError.Code = MCPProtocol::FMCPError::InvalidParams;
@@ -355,7 +369,7 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 Target = &State->EnterConditions;
             }
 
-            const FGuid Id = AddNodeToArray(*Target, Ed, Struct);
+            const FGuid Id = AddNodeToArray(*Target, Struct);
             Tree->MarkPackageDirty();
 
             auto Result = MakeShared<FJsonObject>();
@@ -410,8 +424,29 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             UStateTree* Tree = LoadTree(Params, OutError); if (!Tree) return nullptr;
 
+            // UE 5.3: no UStateTreeEditingSubsystem::CompileStateTree. Drive FStateTreeCompiler directly,
+            // mirroring FStateTreeEditor::Compile / UStateTreeCompileAllCommandlet: hash editor data, compile,
+            // then on success stamp the hash and broadcast OnPostCompile; on failure reset compiled data.
+            uint32 EditorDataHash = 0;
+            if (Tree->EditorData)
+            {
+                FArchiveObjectCrc32 Crc;
+                EditorDataHash = Crc.Crc32(Tree->EditorData, 0);
+            }
+
             FStateTreeCompilerLog Log;
-            const bool bOk = UStateTreeEditingSubsystem::CompileStateTree(Tree, Log);
+            FStateTreeCompiler Compiler(Log);
+            const bool bOk = Compiler.Compile(*Tree);
+            if (bOk)
+            {
+                Tree->LastCompiledEditorDataHash = EditorDataHash;
+                UE::StateTree::Delegates::OnPostCompile.Broadcast(*Tree);
+            }
+            else
+            {
+                Tree->ResetCompiled();
+                Tree->LastCompiledEditorDataHash = 0;
+            }
             Tree->MarkPackageDirty();
 
             auto Result = MakeShared<FJsonObject>();

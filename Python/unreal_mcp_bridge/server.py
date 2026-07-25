@@ -13,8 +13,7 @@ from .tools import (
     register_animgraph_tools,
     register_animnotify_tools,
     register_statetree_tools,
-    register_camerarig_tools,
-    register_camvar_tools,
+    register_behaviortree_tools,
     register_material_tools,
 )
 
@@ -33,8 +32,7 @@ def main() -> None:
     register_animgraph_tools(mcp, conn)
     register_animnotify_tools(mcp, conn)
     register_statetree_tools(mcp, conn)
-    register_camerarig_tools(mcp, conn)
-    register_camvar_tools(mcp, conn)
+    register_behaviortree_tools(mcp, conn)
     register_material_tools(mcp, conn)
 
     try:
