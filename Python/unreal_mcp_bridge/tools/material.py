@@ -408,6 +408,84 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
             raise ValueError("function_path is required")
         return conn.call("material.update_function", {"function_path": function_path})
 
+    # ---------------- placement / layout helpers ----------------
+
+    @mcp.tool()
+    def material_set_node_position(
+        expression_guid: str,
+        pos_x: int,
+        pos_y: int,
+        material_path: str | None = None,
+        function_path: str | None = None,
+        snap: bool = True,
+    ) -> dict:
+        """Move an expression node to a (16px-snapped) position."""
+        if not expression_guid:
+            raise ValueError("expression_guid is required")
+        params = _graph_host(material_path, function_path)
+        params.update({"expression_guid": expression_guid, "pos_x": pos_x, "pos_y": pos_y, "snap": snap})
+        return conn.call("material.set_node_position", params)
+
+    @mcp.tool()
+    def material_arrange_grid(
+        columns: list[list[str]],
+        material_path: str | None = None,
+        function_path: str | None = None,
+        origin_x: int = 0,
+        origin_y: int = 0,
+        col_step: int = 256,
+        row_step: int = 80,
+        snap: bool = True,
+    ) -> dict:
+        """Fast placement: lay nodes out as left->right columns of top->down rows. columns[i][j] is an
+        expression guid placed at (origin_x + i*col_step, origin_y + j*row_step), snapped to 16px."""
+        if not columns:
+            raise ValueError("columns (list of lists of guids) is required")
+        params = _graph_host(material_path, function_path)
+        params.update({"columns": columns, "origin_x": origin_x, "origin_y": origin_y,
+                       "col_step": col_step, "row_step": row_step, "snap": snap})
+        return conn.call("material.arrange_grid", params)
+
+    @mcp.tool()
+    def material_add_channel_reroutes(
+        material_path: str | None = None,
+        function_path: str | None = None,
+        channels: list[str] | None = None,
+        origin_x: int = 0,
+        origin_y: int = 0,
+        row_step: int = 80,
+    ) -> dict:
+        """Create the standard PBR channel Named Reroute declarations (AO/Diffuse/F0/Roughness/Normal/
+        Emissive/UVs) with the project's fixed channel colors, stacked vertically. Pass `channels` to
+        pick a subset/order. Returns {declarations}."""
+        params = _graph_host(material_path, function_path)
+        params.update({"origin_x": origin_x, "origin_y": origin_y, "row_step": row_step})
+        if channels is not None:
+            params["channels"] = channels
+        return conn.call("material.add_channel_reroutes", params)
+
+    @mcp.tool()
+    def material_add_group_comment(
+        text: str,
+        node_guids: list[str],
+        material_path: str | None = None,
+        function_path: str | None = None,
+        padding: int = 48,
+        font_size: int = 18,
+        color: list[float] | None = None,
+    ) -> dict:
+        """Create a group-box comment auto-sized around the given expression nodes, using the project's
+        standard group style. Returns {guid, pos_x, pos_y, size_x, size_y}."""
+        if not text:
+            raise ValueError("text is required")
+        if not node_guids:
+            raise ValueError("node_guids (non-empty list) is required")
+        params = _graph_host(material_path, function_path)
+        params.update({"text": text, "node_guids": node_guids, "padding": padding, "font_size": font_size})
+        if color is not None:
+            params["color"] = color
+        return conn.call("material.add_group_comment", params)
+
 
 def _graph_host(material_path: str | None, function_path: str | None) -> dict:
     """Build the params dict selecting exactly one graph host."""

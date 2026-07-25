@@ -1103,4 +1103,230 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             Func->MarkPackageDirty();
             return MtlOk();
         });
+
+    // =====================================================================================
+    // PLACEMENT / LAYOUT HELPERS  (16px grid; left->right columns, top->down rows)
+    // Convention source: /Game/02_Geo/MasterMaterial (see material-graph-conventions doc).
+    // =====================================================================================
+
+    // material.set_node_position — move an expression node to a grid-snapped position.
+    // Params: material_path OR function_path, expression_guid, pos_x, pos_y, [snap=true (16px)].
+    Registry.Register(TEXT("material.set_node_position"),
+        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FGraphHost Host = LoadGraphHost(Params, OutError);
+            if (!Host.IsValid()) return nullptr;
+            FString GuidStr; if (!MtlRequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
+            int32 PosX = 0, PosY = 0;
+            Params->TryGetNumberField(TEXT("pos_x"), PosX);
+            Params->TryGetNumberField(TEXT("pos_y"), PosY);
+            bool bSnap = true; Params->TryGetBoolField(TEXT("snap"), bSnap);
+
+            UMaterialExpression* Expr = ResolveExpression(Host, GuidStr, OutError);
+            if (!Expr) return nullptr;
+            if (bSnap) { PosX = FMath::RoundToInt(PosX / 16.0f) * 16; PosY = FMath::RoundToInt(PosY / 16.0f) * 16; }
+            Expr->MaterialExpressionEditorX = PosX;
+            Expr->MaterialExpressionEditorY = PosY;
+            Host.AsObject()->MarkPackageDirty();
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("pos_x"), PosX);
+            Result->SetNumberField(TEXT("pos_y"), PosY);
+            return Result;
+        });
+
+    // material.arrange_grid — the fast placement formula. Places nodes on a left->right column /
+    // top->down row grid. Params: material_path OR function_path, columns (array of arrays of expression
+    // guids), [origin_x=0], [origin_y=0], [col_step=256], [row_step=80], [snap=true].
+    // columns[i][j] -> X = origin_x + i*col_step, Y = origin_y + j*row_step (snapped 16).
+    Registry.Register(TEXT("material.arrange_grid"),
+        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FGraphHost Host = LoadGraphHost(Params, OutError);
+            if (!Host.IsValid()) return nullptr;
+
+            const TArray<TSharedPtr<FJsonValue>>* Columns = nullptr;
+            if (!Params->TryGetArrayField(TEXT("columns"), Columns) || !Columns)
+            {
+                MtlFail(OutError, FMCPError::InvalidParams, TEXT("columns (array of arrays of guids) is required"));
+                return nullptr;
+            }
+            int32 OriginX = 0, OriginY = 0, ColStep = 256, RowStep = 80;
+            Params->TryGetNumberField(TEXT("origin_x"), OriginX);
+            Params->TryGetNumberField(TEXT("origin_y"), OriginY);
+            Params->TryGetNumberField(TEXT("col_step"), ColStep);
+            Params->TryGetNumberField(TEXT("row_step"), RowStep);
+            bool bSnap = true; Params->TryGetBoolField(TEXT("snap"), bSnap);
+            auto Snap = [bSnap](int32 V) { return bSnap ? FMath::RoundToInt(V / 16.0f) * 16 : V; };
+
+            TArray<TSharedPtr<FJsonValue>> Placed;
+            for (int32 i = 0; i < Columns->Num(); ++i)
+            {
+                const TArray<TSharedPtr<FJsonValue>>* Col = nullptr;
+                if (!(*Columns)[i]->TryGetArray(Col) || !Col) continue;
+                for (int32 j = 0; j < Col->Num(); ++j)
+                {
+                    const FString GuidStr = (*Col)[j]->AsString();
+                    UMaterialExpression* Expr = ResolveExpression(Host, GuidStr, OutError);
+                    if (!Expr) return nullptr;
+                    const int32 X = Snap(OriginX + i * ColStep);
+                    const int32 Y = Snap(OriginY + j * RowStep);
+                    Expr->MaterialExpressionEditorX = X;
+                    Expr->MaterialExpressionEditorY = Y;
+                    auto O = MakeShared<FJsonObject>();
+                    O->SetStringField(TEXT("guid"), GuidStr);
+                    O->SetNumberField(TEXT("pos_x"), X);
+                    O->SetNumberField(TEXT("pos_y"), Y);
+                    Placed.Add(MakeShared<FJsonValueObject>(O));
+                }
+            }
+            Host.AsObject()->MarkPackageDirty();
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("placed"), Placed.Num());
+            Result->SetArrayField(TEXT("positions"), Placed);
+            return Result;
+        });
+
+    // material.add_channel_reroutes — create the standard PBR channel Named Reroute declarations with the
+    // project's fixed channel colors, stacked vertically. Params: material_path OR function_path,
+    // [channels (array of names; default the 7 standard)], [origin_x=0], [origin_y=0], [row_step=80].
+    // Standard palette: AO/Diffuse/F0/Roughness/Normal/Emissive/UVs. Returns { declarations }.
+    Registry.Register(TEXT("material.add_channel_reroutes"),
+        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FGraphHost Host = LoadGraphHost(Params, OutError);
+            if (!Host.IsValid()) return nullptr;
+
+            struct FChan { const TCHAR* Name; FLinearColor Color; };
+            static const FChan Std[] = {
+                { TEXT("AO"),        FLinearColor(1.0f,   0.0f,   0.094f) },
+                { TEXT("Diffuse"),   FLinearColor(0.0f,   0.414f, 1.0f)   },
+                { TEXT("F0"),        FLinearColor(0.734f, 1.0f,   0.0f)   },
+                { TEXT("Roughness"), FLinearColor(0.945f, 0.0f,   1.0f)   },
+                { TEXT("Normal"),    FLinearColor(0.0f,   1.0f,   0.625f) },
+                { TEXT("Emissive"),  FLinearColor(1.0f,   0.305f, 0.0f)   },
+                { TEXT("UVs"),       FLinearColor(0.0f,   0.016f, 1.0f)   },
+            };
+
+            int32 OriginX = 0, OriginY = 0, RowStep = 80;
+            Params->TryGetNumberField(TEXT("origin_x"), OriginX);
+            Params->TryGetNumberField(TEXT("origin_y"), OriginY);
+            Params->TryGetNumberField(TEXT("row_step"), RowStep);
+
+            TArray<FString> Names;
+            const TArray<TSharedPtr<FJsonValue>>* ChArr = nullptr;
+            if (Params->TryGetArrayField(TEXT("channels"), ChArr) && ChArr)
+            {
+                for (const TSharedPtr<FJsonValue>& V : *ChArr) Names.Add(V->AsString());
+            }
+            else
+            {
+                for (const FChan& C : Std) Names.Add(C.Name);
+            }
+
+            auto ColorFor = [&](const FString& N, FLinearColor& Out) -> bool {
+                for (const FChan& C : Std) { if (N.Equals(C.Name, ESearchCase::IgnoreCase)) { Out = C.Color; return true; } }
+                return false;
+            };
+
+            const int32 X = FMath::RoundToInt(OriginX / 16.0f) * 16;
+            TArray<TSharedPtr<FJsonValue>> Decls;
+            int32 Row = 0;
+            for (const FString& N : Names)
+            {
+                FLinearColor Color(0.0f, 0.0f, 0.0f, 1.0f);
+                ColorFor(N, Color); // unknown name -> black, still created
+                const int32 Y = FMath::RoundToInt((OriginY + Row * RowStep) / 16.0f) * 16;
+
+                UMaterialExpression* Expr = UMaterialEditingLibrary::CreateMaterialExpressionEx(
+                    Host.Material, Host.Function, UMaterialExpressionNamedRerouteDeclaration::StaticClass(), nullptr, X, Y);
+                UMaterialExpressionNamedRerouteDeclaration* Decl = Cast<UMaterialExpressionNamedRerouteDeclaration>(Expr);
+                if (!Decl) { MtlFail(OutError, FMCPError::InternalError, TEXT("failed to create channel reroute")); return nullptr; }
+                Decl->Modify();
+                Decl->Name = FName(*N);
+                Decl->NodeColor = Color;
+                if (!Decl->VariableGuid.IsValid()) Decl->VariableGuid = FGuid::NewGuid();
+
+                auto O = MakeShared<FJsonObject>();
+                O->SetStringField(TEXT("name"), N);
+                O->SetStringField(TEXT("guid"), EnsureExpressionGuid(Decl).ToString());
+                O->SetStringField(TEXT("variable_guid"), Decl->VariableGuid.ToString());
+                Decls.Add(MakeShared<FJsonValueObject>(O));
+                ++Row;
+            }
+            Host.AsObject()->MarkPackageDirty();
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetArrayField(TEXT("declarations"), Decls);
+            return Result;
+        });
+
+    // material.add_group_comment — group-box comment auto-sized around a set of expression nodes, using the
+    // project's standard group style (dark gray 0.15/0.5, font 18). Params: material_path OR function_path,
+    // text, node_guids (array), [padding=48], [font_size=18], [color [r,g,b,a]]. Returns { guid, box }.
+    Registry.Register(TEXT("material.add_group_comment"),
+        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FGraphHost Host = LoadGraphHost(Params, OutError);
+            if (!Host.IsValid()) return nullptr;
+            FString Text; if (!MtlRequireString(Params, TEXT("text"), Text, OutError)) return nullptr;
+            const TArray<TSharedPtr<FJsonValue>>* Guids = nullptr;
+            if (!Params->TryGetArrayField(TEXT("node_guids"), Guids) || !Guids || Guids->Num() == 0)
+            {
+                MtlFail(OutError, FMCPError::InvalidParams, TEXT("node_guids (non-empty array) is required"));
+                return nullptr;
+            }
+            int32 Padding = 48, FontSize = 18;
+            Params->TryGetNumberField(TEXT("padding"), Padding);
+            Params->TryGetNumberField(TEXT("font_size"), FontSize);
+
+            // Positions are node top-left corners; sizes are not exposed, so approximate node extent.
+            const int32 NodeW = 200, NodeH = 128, HeaderTop = 48;
+            bool bAny = false; int32 MinX = 0, MinY = 0, MaxX = 0, MaxY = 0;
+            for (const TSharedPtr<FJsonValue>& V : *Guids)
+            {
+                UMaterialExpression* Expr = ResolveExpression(Host, V->AsString(), OutError);
+                if (!Expr) return nullptr;
+                const int32 X = Expr->MaterialExpressionEditorX, Y = Expr->MaterialExpressionEditorY;
+                if (!bAny) { MinX = MaxX = X; MinY = MaxY = Y; bAny = true; }
+                MinX = FMath::Min(MinX, X); MinY = FMath::Min(MinY, Y);
+                MaxX = FMath::Max(MaxX, X); MaxY = FMath::Max(MaxY, Y);
+            }
+
+            auto Snap = [](int32 V) { return FMath::RoundToInt(V / 16.0f) * 16; };
+            const int32 BoxX = Snap(MinX - Padding);
+            const int32 BoxY = Snap(MinY - Padding - HeaderTop);
+            const int32 BoxW = Snap((MaxX + NodeW + Padding) - BoxX);
+            const int32 BoxH = Snap((MaxY + NodeH + Padding) - BoxY);
+
+            FLinearColor Color(0.15f, 0.15f, 0.15f, 0.5f);
+            const TArray<TSharedPtr<FJsonValue>>* ColorArr = nullptr;
+            if (Params->TryGetArrayField(TEXT("color"), ColorArr)) { if (!ReadLinearColor(Params, TEXT("color"), Color, OutError)) return nullptr; }
+
+            UMaterialExpressionComment* Comment = NewObject<UMaterialExpressionComment>(
+                Host.AsObject(), UMaterialExpressionComment::StaticClass(), NAME_None, RF_Transactional);
+            if (!Comment) { MtlFail(OutError, FMCPError::InternalError, TEXT("failed to create comment")); return nullptr; }
+            Comment->MaterialExpressionEditorX = BoxX;
+            Comment->MaterialExpressionEditorY = BoxY;
+            Comment->SizeX = BoxW;
+            Comment->SizeY = BoxH;
+            Comment->Text = Text;
+            Comment->FontSize = FontSize;
+            Comment->CommentColor = Color;
+            if (!Comment->MaterialExpressionGuid.IsValid()) Comment->MaterialExpressionGuid = FGuid::NewGuid();
+
+            Host.AsObject()->Modify();
+            if (Host.Material) Host.Material->GetExpressionCollection().AddComment(Comment);
+            else Host.Function->GetExpressionCollection().AddComment(Comment);
+            Host.AsObject()->MarkPackageDirty();
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetStringField(TEXT("guid"), Comment->MaterialExpressionGuid.ToString());
+            Result->SetNumberField(TEXT("pos_x"), BoxX);
+            Result->SetNumberField(TEXT("pos_y"), BoxY);
+            Result->SetNumberField(TEXT("size_x"), BoxW);
+            Result->SetNumberField(TEXT("size_y"), BoxH);
+            return Result;
+        });
 }
