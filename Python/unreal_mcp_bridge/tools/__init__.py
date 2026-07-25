@@ -8,6 +8,7 @@ from .animnotify import register_animnotify_tools
 from .statetree import register_statetree_tools
 from .camerarig import register_camerarig_tools
 from .camvar import register_camvar_tools
+from .material import register_material_tools
 
 __all__ = [
     "register_editor_tools",
@@ -20,4 +21,5 @@ __all__ = [
     "register_statetree_tools",
     "register_camerarig_tools",
     "register_camvar_tools",
+    "register_material_tools",
 ]

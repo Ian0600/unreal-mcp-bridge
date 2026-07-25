@@ -13,6 +13,7 @@
 #include "Commands/StateTreeCommands.h"
 #include "Commands/CameraRigCommands.h"
 #include "Commands/CameraVariableCommands.h"
+#include "Commands/MaterialCommands.h"
 
 void UMCPBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -53,6 +54,7 @@ void UMCPBridgeSubsystem::StartListener()
         Handlers.Add(MakeShared<FStateTreeCommandHandler>());
         Handlers.Add(MakeShared<FCameraRigCommandHandler>());
         Handlers.Add(MakeShared<FCameraVariableCommandHandler>());
+        Handlers.Add(MakeShared<FMaterialCommandHandler>());
 
         for (const TSharedPtr<IMCPCommandHandler>& Handler : Handlers)
         {

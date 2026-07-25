@@ -37,6 +37,8 @@ public class UnrealMCPBridge : ModuleRules
             "Kismet",
             "KismetCompiler",
             "BlueprintGraph",
+            // Material authoring (UMaterialEditingLibrary lives in the MaterialEditor module)
+            "MaterialEditor",
             "LiveCoding",
             "LevelEditor",
             "PythonScriptPlugin",
