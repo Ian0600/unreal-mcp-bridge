@@ -91,6 +91,67 @@ public:
         UBlueprint* Blueprint,
         const FString& GraphName);
 
+    // Implements a Blueprint interface on the Blueprint (equivalent to Class Settings > Interfaces > Add).
+    // InterfaceClassPath is the interface's generated class path — a BP interface asset's class,
+    // e.g. "/Game/.../BPI_Foo.BPI_Foo_C", or a native "/Script/Module.UMyInterface". For interface
+    // functions that have return values (or output params), this creates their function graphs
+    // (Entry + Result nodes) which you then populate with nodes + ConnectPins. Returns true on success.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static bool ImplementInterface(UBlueprint* Blueprint, const FString& InterfaceClassPath);
+
+    // Adds a K2Node_MakeStruct for the struct at StructPath (e.g. a UserDefinedStruct
+    // "/Game/.../S_Foo.S_Foo", or a native "/Script/CoreUObject.Vector"). Each struct member
+    // becomes an input pin; for UserDefinedStructs those pin names carry a GUID suffix
+    // (e.g. "Velocity_12_ABC...") — fetch the real names via blueprint.get_graph_nodes before
+    // ConnectPins. The struct output pin is named after the struct. Returns the new node's name,
+    // or empty string on failure.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static FString AddMakeStructNode(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& StructPath,
+        int32 PosX,
+        int32 PosY);
+
+    // Adds a K2Node_Select (the data multiplexer: pick one of N option values by an Index). Starts as
+    // a wildcard 2-option select; wiring settles its types the way the editor does on a drag — connect a
+    // bool/int/enum to its "Index" pin and connect the "Return Value" output to a typed pin, then the
+    // option pins take that type. For a bool index the two options are "Option 0" (false) / "Option 1"
+    // (true); set their literals with SetPinDefaultValue. Returns the new node's name, or empty on failure.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static FString AddSelectNode(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        int32 PosX,
+        int32 PosY);
+
+    // Sets an (unconnected) input pin's literal default value, through the graph schema so enum/struct/
+    // object literals are validated and the node is notified (what typing into the pin in-editor does).
+    // Value is the pin's serialized form: for a UserDefinedEnum pin that is the raw enumerator name
+    // ("NewEnumerator0", "NewEnumerator1", ...), for numbers the number, for bools "true"/"false".
+    // Returns false if the graph/node/pin is not found or the schema rejects the value.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static bool SetPinDefaultValue(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& NodeName,
+        const FString& PinName,
+        const FString& Value);
+
+    // Sets an UObject-typed UPROPERTY directly on a graph node's C++ object, bypassing the script-access
+    // protection that blocks set_editor_property (some K2 nodes keep essential refs in a plain, non-Edit
+    // UPROPERTY — e.g. K2Node_SetCameraRigParameter::CameraRig). PropertyName is the C++ property name;
+    // ObjectPath is a package path to load (empty string clears it to null). After the write the node is
+    // reconstructed so its title/pins refresh the way the editor does. Returns false if the graph/node/
+    // property is not found, the property is not object-typed, or the object fails to load.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static bool SetNodeObjectProperty(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& NodeName,
+        const FString& PropertyName,
+        const FString& ObjectPath);
+
     // ---- AnimGraph (AnimBlueprint-only) ----
 
     // Adds a State Machine node to the named AnimGraph (an AnimBlueprint's main graph is a
@@ -219,6 +280,34 @@ public:
         int32 AxisIndex,
         float Min,
         float Max);
+
+    // Exposes a camera node property on a UCameraRigAsset as a blendable interface parameter —
+    // the scriptable equivalent of "expose" on a property in the camera rig editor.
+    //
+    // Why this is not reachable from plain Python: the parameter list lives in
+    // UBaseCameraObject::Interface, which has no editor-property access, so
+    // get/set_editor_property refuses it. Only a name in that list can be driven by a
+    // K2Node_SetCameraRigParameter; anything else throws "No such camera parameter: X" at
+    // runtime and the write is silently dropped.
+    //
+    // NodeClass is a short class name ("BoomArmCameraNode"), NodeIndex picks among multiple
+    // matches. The variable type is inferred from the property's F<Type>CameraParameter struct,
+    // so a caller cannot pair a parameter with the wrong type. Rebuilds the rig on success —
+    // the runtime's parameter definitions are produced by the build, not by the edit.
+    // Returns empty string on success, or a human-readable reason on failure.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Camera", meta = (DevelopmentOnly))
+    static FString ExposeCameraRigParameter(
+        class UCameraRigAsset* Rig,
+        const FString& ParameterName,
+        const FString& NodeClass,
+        const FString& PropertyName,
+        int32 NodeIndex = 0);
+
+    // Lists a rig's exposed blendable interface parameters as
+    // "Name|Type|TargetNode.TargetProperty" entries. The counterpart read for
+    // ExposeCameraRigParameter, and the way to check what a K2Node_SetCameraRigParameter may bind to.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Camera", meta = (DevelopmentOnly))
+    static TArray<FString> ListCameraRigParameters(class UCameraRigAsset* Rig);
 
     // Resolves GraphName against Blueprint's top-level graphs, then (for AnimBlueprints) falls
     // back to nested AnimGraph graphs: state machine inner graphs, state bound graphs, and

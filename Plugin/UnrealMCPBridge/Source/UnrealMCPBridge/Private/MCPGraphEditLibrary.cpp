@@ -9,6 +9,8 @@
 #include "K2Node_CallFunction.h"
 #include "K2Node_IfThenElse.h"
 #include "K2Node_VariableGet.h"
+#include "K2Node_MakeStruct.h"
+#include "K2Node_Select.h"
 
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -16,6 +18,13 @@
 #include "UObject/Package.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectHash.h"
+#include "UObject/UnrealType.h"
+
+#include "Core/CameraRigAsset.h"
+#include "Core/CameraNode.h"
+#include "Core/CameraObjectInterface.h"
+#include "Core/CameraVariableTableFwd.h"
+#include "UObject/UnrealType.h"
 #include "UnrealMCPBridgeModule.h"
 
 #include "Animation/AnimBlueprint.h"
@@ -51,6 +60,16 @@ UEdGraph* UMCPGraphEditLibrary::FindGraphByName(UBlueprint* BP, const FString& G
     if (UEdGraph* G = Search(BP->UbergraphPages)) return G;
     if (UEdGraph* G = Search(BP->FunctionGraphs)) return G;
     if (UEdGraph* G = Search(BP->MacroGraphs))    return G;
+
+    // Interface function implementations (functions with return/out params) live in
+    // ImplementedInterfaces[].Graphs, not FunctionGraphs — search those too.
+    for (const FBPInterfaceDescription& Iface : BP->ImplementedInterfaces)
+    {
+        for (const TObjectPtr<UEdGraph>& G : Iface.Graphs)
+        {
+            if (G && G->GetName() == GraphName) return G;
+        }
+    }
 
     // Not a top-level graph — check nested AnimGraph graphs (state machine inner graphs,
     // state bound graphs, transition rule graphs), which BP's top-level arrays don't include.
@@ -236,6 +255,208 @@ FString UMCPGraphEditLibrary::AddVariableGetNode(
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
     Blueprint->MarkPackageDirty();
     return Node->GetName();
+}
+
+bool UMCPGraphEditLibrary::ImplementInterface(UBlueprint* Blueprint, const FString& InterfaceClassPath)
+{
+    if (!Blueprint)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("ImplementInterface: Blueprint is null"));
+        return false;
+    }
+
+    UClass* IfaceClass = LoadObject<UClass>(nullptr, *InterfaceClassPath);
+    if (!IfaceClass)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("ImplementInterface: interface class '%s' not found"), *InterfaceClassPath);
+        return false;
+    }
+
+    // Same call the editor's "Class Settings > Interfaces > Add" makes; creates function graphs
+    // (Entry + Result) for any interface functions that have outputs.
+    const bool bAdded = FBlueprintEditorUtils::ImplementNewInterface(Blueprint, IfaceClass->GetClassPathName());
+    if (bAdded)
+    {
+        FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+        Blueprint->MarkPackageDirty();
+    }
+    return bAdded;
+}
+
+FString UMCPGraphEditLibrary::AddMakeStructNode(
+    UBlueprint* Blueprint,
+    const FString& GraphName,
+    const FString& StructPath,
+    int32 PosX,
+    int32 PosY)
+{
+    if (!Blueprint)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddMakeStructNode: Blueprint is null"));
+        return FString();
+    }
+
+    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    if (!Graph)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddMakeStructNode: graph '%s' not found"), *GraphName);
+        return FString();
+    }
+
+    UScriptStruct* Struct = LoadObject<UScriptStruct>(nullptr, *StructPath);
+    if (!Struct)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddMakeStructNode: struct '%s' not found"), *StructPath);
+        return FString();
+    }
+
+    UK2Node_MakeStruct* Node = NewObject<UK2Node_MakeStruct>(Graph);
+    Graph->AddNode(Node, /*bFromUI*/ false, /*bSelectNewNode*/ false);
+    Node->CreateNewGuid();
+    Node->StructType = Struct;
+    Node->bMadeAfterOverridePinRemoval = true;   // new node: don't emit the legacy override-pin warning
+    Node->NodePosX = PosX;
+    Node->NodePosY = PosY;
+    Node->AllocateDefaultPins();
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return Node->GetName();
+}
+
+FString UMCPGraphEditLibrary::AddSelectNode(
+    UBlueprint* Blueprint,
+    const FString& GraphName,
+    int32 PosX,
+    int32 PosY)
+{
+    if (!Blueprint)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddSelectNode: Blueprint is null"));
+        return FString();
+    }
+
+    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    if (!Graph)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("AddSelectNode: graph '%s' not found"), *GraphName);
+        return FString();
+    }
+
+    UK2Node_Select* Node = NewObject<UK2Node_Select>(Graph);
+    Graph->AddNode(Node, /*bFromUI*/ false, /*bSelectNewNode*/ false);
+    Node->CreateNewGuid();
+    Node->NodePosX = PosX;
+    Node->NodePosY = PosY;
+    Node->AllocateDefaultPins();
+
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return Node->GetName();
+}
+
+bool UMCPGraphEditLibrary::SetPinDefaultValue(
+    UBlueprint* Blueprint,
+    const FString& GraphName,
+    const FString& NodeName,
+    const FString& PinName,
+    const FString& Value)
+{
+    if (!Blueprint) return false;
+    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    if (!Graph)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("SetPinDefaultValue: graph '%s' not found"), *GraphName);
+        return false;
+    }
+
+    UEdGraphNode* Node = FindNodeByName(Graph, NodeName);
+    if (!Node)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("SetPinDefaultValue: node '%s' not found"), *NodeName);
+        return false;
+    }
+
+    UEdGraphPin* Pin = FindPinByName(Node, PinName);
+    if (!Pin)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("SetPinDefaultValue: pin '%s.%s' not found"), *NodeName, *PinName);
+        return false;
+    }
+
+    // Through the schema (not a raw Pin->DefaultValue write) so enum/struct/object literals are parsed
+    // and validated and the owning node is notified — what typing a value into the pin in-editor does.
+    const UEdGraphSchema* Schema = Graph->GetSchema();
+    if (!Schema)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("SetPinDefaultValue: graph '%s' has no schema"), *GraphName);
+        return false;
+    }
+
+    Schema->TrySetDefaultValue(*Pin, Value);
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return true;
+}
+
+bool UMCPGraphEditLibrary::SetNodeObjectProperty(
+    UBlueprint* Blueprint,
+    const FString& GraphName,
+    const FString& NodeName,
+    const FString& PropertyName,
+    const FString& ObjectPath)
+{
+    if (!Blueprint) return false;
+    UEdGraph* Graph = FindGraphByName(Blueprint, GraphName);
+    if (!Graph)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("SetNodeObjectProperty: graph '%s' not found"), *GraphName);
+        return false;
+    }
+
+    UEdGraphNode* Node = FindNodeByName(Graph, NodeName);
+    if (!Node)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("SetNodeObjectProperty: node '%s' not found"), *NodeName);
+        return false;
+    }
+
+    // The property is often protected / non-Edit, so go straight through reflection rather than the
+    // scripting layer that set_editor_property uses.
+    FObjectPropertyBase* ObjProp = FindFProperty<FObjectPropertyBase>(Node->GetClass(), *PropertyName);
+    if (!ObjProp)
+    {
+        UE_LOG(LogMCPBridge, Warning,
+            TEXT("SetNodeObjectProperty: object property '%s' not found on node '%s' (%s)"),
+            *PropertyName, *NodeName, *Node->GetClass()->GetName());
+        return false;
+    }
+
+    UObject* Value = nullptr;
+    if (!ObjectPath.IsEmpty())
+    {
+        Value = StaticLoadObject(UObject::StaticClass(), nullptr, *ObjectPath);
+        if (!Value)
+        {
+            UE_LOG(LogMCPBridge, Warning, TEXT("SetNodeObjectProperty: failed to load object '%s'"), *ObjectPath);
+            return false;
+        }
+        if (ObjProp->PropertyClass && !Value->IsA(ObjProp->PropertyClass))
+        {
+            UE_LOG(LogMCPBridge, Warning,
+                TEXT("SetNodeObjectProperty: '%s' is a %s, not the expected %s"),
+                *ObjectPath, *Value->GetClass()->GetName(), *ObjProp->PropertyClass->GetName());
+            return false;
+        }
+    }
+
+    Node->Modify();
+    ObjProp->SetObjectPropertyValue_InContainer(Node, Value);
+    // Refresh title/pins the way the editor does after such an edit; connections restore by pin name.
+    Node->ReconstructNode();
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    Blueprint->MarkPackageDirty();
+    return true;
 }
 
 bool UMCPGraphEditLibrary::ConnectPins(
@@ -893,5 +1114,185 @@ FString UMCPGraphEditLibrary::AddAnimTransition(
     FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(AnimBlueprint);
     AnimBlueprint->MarkPackageDirty();
     return TransNode->GetName();
+}
+
+namespace
+{
+    // The Nth UCameraNode of the given short class name under the rig, or null.
+    UCameraNode* FindCameraNodeByClass(UCameraRigAsset* Rig, const FString& NodeClass, int32 NodeIndex)
+    {
+        TArray<UCameraNode*> Nodes;
+        ForEachObjectWithOuter(Rig, [&Nodes](UObject* Obj)
+        {
+            if (UCameraNode* Node = Cast<UCameraNode>(Obj))
+            {
+                Nodes.Add(Node);
+            }
+        }, /*bIncludeNestedObjects=*/true);
+
+        int32 MatchIndex = 0;
+        for (UCameraNode* Node : Nodes)
+        {
+            // Tolerate both "BoomArmCameraNode" and "UBoomArmCameraNode".
+            const FString ClassName = Node->GetClass()->GetName();
+            const bool bMatches = ClassName.Equals(NodeClass, ESearchCase::IgnoreCase)
+                || (TEXT("U") + ClassName).Equals(NodeClass, ESearchCase::IgnoreCase);
+            if (bMatches)
+            {
+                if (MatchIndex == NodeIndex) { return Node; }
+                ++MatchIndex;
+            }
+        }
+        return nullptr;
+    }
+
+    // An exposable camera node property is a struct named F<Type>CameraParameter, where <Type> is
+    // an ECameraVariableType entry (FVector3dCameraParameter -> Vector3d, FFloatCameraParameter ->
+    // Float). Deriving the type from the property is what stops a caller from pairing a parameter
+    // with the wrong type and getting one that builds but never resolves.
+    bool InferCameraVariableType(const FProperty* Prop, ECameraVariableType& OutType, FString& OutStructName)
+    {
+        const FStructProperty* StructProp = CastField<FStructProperty>(Prop);
+        if (!StructProp || !StructProp->Struct)
+        {
+            return false;
+        }
+
+        OutStructName = StructProp->Struct->GetName();
+        if (!OutStructName.EndsWith(TEXT("CameraParameter")))
+        {
+            return false;
+        }
+
+        const FString TypeName = OutStructName.LeftChop(FString(TEXT("CameraParameter")).Len());
+        const UEnum* Enum = StaticEnum<ECameraVariableType>();
+        const int64 Value = Enum ? Enum->GetValueByNameString(TypeName) : INDEX_NONE;
+        if (Value == INDEX_NONE)
+        {
+            return false;
+        }
+
+        OutType = static_cast<ECameraVariableType>(Value);
+        return true;
+    }
+}
+
+FString UMCPGraphEditLibrary::ExposeCameraRigParameter(
+    UCameraRigAsset* Rig,
+    const FString& ParameterName,
+    const FString& NodeClass,
+    const FString& PropertyName,
+    int32 NodeIndex)
+{
+    if (!Rig)
+    {
+        return TEXT("Rig is null");
+    }
+    if (ParameterName.IsEmpty())
+    {
+        return TEXT("ParameterName must not be empty");
+    }
+
+    if (Rig->Interface.FindBlendableParameterByName(ParameterName))
+    {
+        return FString::Printf(TEXT("Rig already exposes a blendable parameter named '%s'"), *ParameterName);
+    }
+
+    UCameraNode* Target = FindCameraNodeByClass(Rig, NodeClass, NodeIndex);
+    if (!Target)
+    {
+        return FString::Printf(TEXT("No node of class '%s' (index %d) in rig"), *NodeClass, NodeIndex);
+    }
+
+    const FProperty* Prop = FindFProperty<FProperty>(Target->GetClass(), *PropertyName);
+    if (!Prop)
+    {
+        return FString::Printf(TEXT("Property '%s' not found on %s"), *PropertyName, *Target->GetClass()->GetName());
+    }
+
+    ECameraVariableType VariableType;
+    FString StructName;
+    if (!InferCameraVariableType(Prop, VariableType, StructName))
+    {
+        return FString::Printf(
+            TEXT("Property '%s' on %s is '%s', not an F<Type>CameraParameter struct — only camera parameters can be exposed"),
+            *PropertyName, *Target->GetClass()->GetName(),
+            StructName.IsEmpty() ? *Prop->GetCPPType() : *StructName);
+    }
+
+    // Refuse to double-drive one property: two getters on the same target would leave which
+    // parameter wins up to connection order.
+    if (Rig->Connections.FindByTarget(Target, *PropertyName))
+    {
+        return FString::Printf(TEXT("%s.%s is already driven by an existing connection"),
+            *Target->GetName(), *PropertyName);
+    }
+
+    Rig->Modify();
+
+    // Mirrors FCameraRigAssembler::AddBlendableParameter (GameplayCameras
+    // Build/CameraAssetAssembleUtils.h): the parameter object alone is inert — what binds it to the
+    // node is a getter in the rig's connection list, keyed by the parameter's Guid.
+    UCameraObjectInterfaceBlendableParameter* Parameter =
+        NewObject<UCameraObjectInterfaceBlendableParameter>(Rig, NAME_None, RF_Transactional);
+    Parameter->InterfaceParameterName = ParameterName;
+    Parameter->VariableType = VariableType;
+    Rig->Interface.BlendableParameters.Add(Parameter);
+
+    if (!Parameter->GetGuid().IsValid())
+    {
+        return TEXT("New interface parameter has an invalid Guid");
+    }
+
+    UCameraObjectInterfaceParameterGetter* Getter =
+        NewObject<UCameraObjectInterfaceParameterGetter>(Rig, NAME_None, RF_Transactional);
+    Getter->ParameterGuid = Parameter->GetGuid();
+    Rig->Connections.Add(Getter, NAME_None, Target, *PropertyName);
+
+    // Build here rather than leaving it to the caller: the parameter definitions the runtime looks
+    // up (GetParameterDefinitions) are produced by the build, so an unbuilt rig still reports
+    // "No such camera parameter".
+    Rig->DirtyBuildStatus();
+    Rig->BuildCameraRig();
+    Rig->MarkPackageDirty();
+
+    return FString();
+}
+
+TArray<FString> UMCPGraphEditLibrary::ListCameraRigParameters(UCameraRigAsset* Rig)
+{
+    TArray<FString> Out;
+    if (!Rig)
+    {
+        return Out;
+    }
+
+    const UEnum* TypeEnum = StaticEnum<ECameraVariableType>();
+    for (const UCameraObjectInterfaceBlendableParameter* Parameter : Rig->Interface.BlendableParameters)
+    {
+        if (!Parameter) continue;
+
+        const FString TypeName = TypeEnum
+            ? TypeEnum->GetNameStringByValue(static_cast<int64>(Parameter->VariableType))
+            : TEXT("?");
+
+        // A parameter with no getter connection is exposed but wired to nothing — worth seeing.
+        FString Bound = TEXT("(unbound)");
+        for (const FCameraObjectConnection& Connection : Rig->Connections.Connections)
+        {
+            const UCameraObjectInterfaceParameterGetter* Getter =
+                Cast<UCameraObjectInterfaceParameterGetter>(Connection.Source);
+            if (Getter && Getter->ParameterGuid == Parameter->GetGuid())
+            {
+                Bound = FString::Printf(TEXT("%s.%s"),
+                    Connection.Target ? *Connection.Target->GetName() : TEXT("None"),
+                    *Connection.TargetPropertyName.ToString());
+                break;
+            }
+        }
+
+        Out.Add(FString::Printf(TEXT("%s|%s|%s"), *Parameter->InterfaceParameterName, *TypeName, *Bound));
+    }
+    return Out;
 }
 
