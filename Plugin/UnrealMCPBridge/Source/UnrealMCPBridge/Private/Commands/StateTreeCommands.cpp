@@ -43,7 +43,7 @@ namespace
         return Ed;
     }
 
-    bool RequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, MCPProtocol::FMCPError& OutError)
+    bool StRequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, MCPProtocol::FMCPError& OutError)
     {
         if (!Params->TryGetStringField(Field, Out) || Out.IsEmpty())
         {
@@ -156,7 +156,7 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UStateTree* Tree = LoadTree(Params, OutError); if (!Tree) return nullptr;
             UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
 
-            FString StateName; if (!RequireString(Params, TEXT("state_name"), StateName, OutError)) return nullptr;
+            FString StateName; if (!StRequireString(Params, TEXT("state_name"), StateName, OutError)) return nullptr;
             FString ParentId; Params->TryGetStringField(TEXT("parent_state_id"), ParentId);
 
             UStateTreeState* Parent = nullptr;
@@ -187,7 +187,7 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UStateTree* Tree = LoadTree(Params, OutError); if (!Tree) return nullptr;
             UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
 
-            FString StructPath; if (!RequireString(Params, TEXT("struct_path"), StructPath, OutError)) return nullptr;
+            FString StructPath; if (!StRequireString(Params, TEXT("struct_path"), StructPath, OutError)) return nullptr;
             const UScriptStruct* Struct = FindNodeStruct(StructPath);
             if (!Struct) { OutError.Code = MCPProtocol::FMCPError::InvalidParams; OutError.Message = FString::Printf(TEXT("struct not found: %s"), *StructPath); return nullptr; }
 
@@ -207,8 +207,8 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
 
             FString StateId, StructPath;
-            if (!RequireString(Params, TEXT("state_id"), StateId, OutError)) return nullptr;
-            if (!RequireString(Params, TEXT("struct_path"), StructPath, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("state_id"), StateId, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("struct_path"), StructPath, OutError)) return nullptr;
 
             FGuid Guid; FGuid::Parse(StateId, Guid);
             UStateTreeState* State = FindStateById(Ed, Guid);
@@ -233,8 +233,8 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
 
             FString FromId, ToId;
-            if (!RequireString(Params, TEXT("from_state_id"), FromId, OutError)) return nullptr;
-            if (!RequireString(Params, TEXT("to_state_id"), ToId, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("from_state_id"), FromId, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("to_state_id"), ToId, OutError)) return nullptr;
             FString TriggerStr; Params->TryGetStringField(TEXT("trigger"), TriggerStr);
 
             FGuid FromGuid, ToGuid; FGuid::Parse(FromId, FromGuid); FGuid::Parse(ToId, ToGuid);
@@ -259,10 +259,10 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
 
             FString SrcId, SrcPath, TgtId, TgtPath;
-            if (!RequireString(Params, TEXT("source_node_id"), SrcId, OutError)) return nullptr;
-            if (!RequireString(Params, TEXT("source_path"), SrcPath, OutError)) return nullptr;
-            if (!RequireString(Params, TEXT("target_node_id"), TgtId, OutError)) return nullptr;
-            if (!RequireString(Params, TEXT("target_path"), TgtPath, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("source_node_id"), SrcId, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("source_path"), SrcPath, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("target_node_id"), TgtId, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("target_path"), TgtPath, OutError)) return nullptr;
 
             FGuid SrcGuid, TgtGuid; FGuid::Parse(SrcId, SrcGuid); FGuid::Parse(TgtId, TgtGuid);
 
@@ -290,7 +290,7 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UStateTree* Tree = LoadTree(Params, OutError); if (!Tree) return nullptr;
             UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
 
-            FString StateId; if (!RequireString(Params, TEXT("state_id"), StateId, OutError)) return nullptr;
+            FString StateId; if (!StRequireString(Params, TEXT("state_id"), StateId, OutError)) return nullptr;
             FGuid Guid; FGuid::Parse(StateId, Guid);
             UStateTreeState* State = FindStateById(Ed, Guid);
             if (!State) { OutError.Code = MCPProtocol::FMCPError::InvalidParams; OutError.Message = TEXT("state_id not found"); return nullptr; }
@@ -374,8 +374,8 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
 
             FString NodeId, PropName, Value;
-            if (!RequireString(Params, TEXT("node_id"), NodeId, OutError)) return nullptr;
-            if (!RequireString(Params, TEXT("property"), PropName, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("node_id"), NodeId, OutError)) return nullptr;
+            if (!StRequireString(Params, TEXT("property"), PropName, OutError)) return nullptr;
             if (!Params->TryGetStringField(TEXT("value"), Value))
             {
                 OutError.Code = MCPProtocol::FMCPError::InvalidParams; OutError.Message = TEXT("value is required"); return nullptr;

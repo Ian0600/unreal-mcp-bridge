@@ -27,7 +27,7 @@ namespace
         return Rig;
     }
 
-    bool RequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, MCPProtocol::FMCPError& OutError)
+    bool RigRequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, MCPProtocol::FMCPError& OutError)
     {
         if (!Params->TryGetStringField(Field, Out) || Out.IsEmpty())
         {
@@ -100,9 +100,9 @@ void FCameraRigCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UCameraRigAsset* Rig = LoadRig(Params, OutError); if (!Rig) return nullptr;
 
             FString NodeClass, PropertyName, Value;
-            if (!RequireString(Params, TEXT("node_class"), NodeClass, OutError)) return nullptr;
-            if (!RequireString(Params, TEXT("property_name"), PropertyName, OutError)) return nullptr;
-            if (!RequireString(Params, TEXT("value"), Value, OutError)) return nullptr;
+            if (!RigRequireString(Params, TEXT("node_class"), NodeClass, OutError)) return nullptr;
+            if (!RigRequireString(Params, TEXT("property_name"), PropertyName, OutError)) return nullptr;
+            if (!RigRequireString(Params, TEXT("value"), Value, OutError)) return nullptr;
             double IndexD = 0; Params->TryGetNumberField(TEXT("node_index"), IndexD);
             const int32 WantIndex = static_cast<int32>(IndexD);
 
