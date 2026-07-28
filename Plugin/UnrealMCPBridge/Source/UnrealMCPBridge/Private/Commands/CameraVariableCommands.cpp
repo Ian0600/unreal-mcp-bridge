@@ -1,4 +1,5 @@
 #include "Commands/CameraVariableCommands.h"
+#include "Commands/CommandJsonHelpers.h"
 #include "MCPCommandRegistry.h"
 #include "MCPProtocol.h"
 #include "Dom/JsonObject.h"
@@ -10,6 +11,8 @@
 
 namespace
 {
+    using UnrealMCPBridge::Json::RequireString;
+
     UCameraVariableCollection* LoadCollection(const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError)
     {
         FString Path;
@@ -26,17 +29,6 @@ namespace
             OutError.Message = FString::Printf(TEXT("Could not load CameraVariableCollection: %s"), *Path);
         }
         return Coll;
-    }
-
-    bool CamVarRequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, MCPProtocol::FMCPError& OutError)
-    {
-        if (!Params->TryGetStringField(Field, Out) || Out.IsEmpty())
-        {
-            OutError.Code = MCPProtocol::FMCPError::InvalidParams;
-            OutError.Message = FString::Printf(TEXT("%s is required and must be non-empty"), Field);
-            return false;
-        }
-        return true;
     }
 
     // Resolves a short variable type ("Vector3d", "Double", "Boolean", ...) to its concrete
@@ -112,8 +104,8 @@ void FCameraVariableCommandHandler::RegisterCommands(FMCPCommandRegistry& Regist
         {
             FString PackagePath, Name;
             if (!Params.IsValid()) { OutError.Code = MCPProtocol::FMCPError::InvalidParams; OutError.Message = TEXT("params required"); return nullptr; }
-            if (!CamVarRequireString(Params, TEXT("package_path"), PackagePath, OutError)) return nullptr;
-            if (!CamVarRequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("package_path"), PackagePath, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
 
             const FString FullName = PackagePath / Name;
             if (FindPackage(nullptr, *FullName) || LoadObject<UCameraVariableCollection>(nullptr, *(FullName + TEXT(".") + Name)))
@@ -152,8 +144,8 @@ void FCameraVariableCommandHandler::RegisterCommands(FMCPCommandRegistry& Regist
             UCameraVariableCollection* Coll = LoadCollection(Params, OutError); if (!Coll) return nullptr;
 
             FString VarType, Name;
-            if (!CamVarRequireString(Params, TEXT("var_type"), VarType, OutError)) return nullptr;
-            if (!CamVarRequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("var_type"), VarType, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
 
             UClass* VarClass = ResolveVarClass(VarType, OutError); if (!VarClass) return nullptr;
 
@@ -242,8 +234,8 @@ void FCameraVariableCommandHandler::RegisterCommands(FMCPCommandRegistry& Regist
             UCameraVariableCollection* Coll = LoadCollection(Params, OutError); if (!Coll) return nullptr;
 
             FString Name, Value;
-            if (!CamVarRequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
-            if (!CamVarRequireString(Params, TEXT("value"), Value, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("value"), Value, OutError)) return nullptr;
 
             UCameraVariableAsset* Target = nullptr;
             for (UCameraVariableAsset* Var : Coll->Variables)

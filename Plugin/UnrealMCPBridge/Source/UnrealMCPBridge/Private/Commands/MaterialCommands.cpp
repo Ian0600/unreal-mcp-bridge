@@ -31,16 +31,7 @@ namespace
 {
     // ---------- generic param helpers ----------
 
-    bool MtlRequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, FMCPError& OutError)
-    {
-        if (!Params.IsValid() || !Params->TryGetStringField(Field, Out) || Out.IsEmpty())
-        {
-            OutError.Code = FMCPError::InvalidParams;
-            OutError.Message = FString::Printf(TEXT("%s is required and must be non-empty"), Field);
-            return false;
-        }
-        return true;
-    }
+    using UnrealMCPBridge::Json::RequireString;
 
     void MtlFail(FMCPError& OutError, int32 Code, const FString& Msg)
     {
@@ -54,7 +45,7 @@ namespace
     T* MtlLoadTyped(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FMCPError& OutError)
     {
         FString Path;
-        if (!MtlRequireString(Params, Field, Path, OutError)) return nullptr;
+        if (!RequireString(Params, Field, Path, OutError)) return nullptr;
         T* Obj = LoadObject<T>(nullptr, *Path);
         if (!Obj)
         {
@@ -261,8 +252,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
             FString PackagePath, AssetName;
-            if (!MtlRequireString(Params, TEXT("package_path"), PackagePath, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("asset_name"), AssetName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("package_path"), PackagePath, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("asset_name"), AssetName, OutError)) return nullptr;
 
             IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
             UMaterialFactoryNew* Factory = NewObject<UMaterialFactoryNew>();
@@ -279,9 +270,9 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
             FString PackagePath, AssetName, ParentPath;
-            if (!MtlRequireString(Params, TEXT("package_path"), PackagePath, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("asset_name"), AssetName, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("parent_path"), ParentPath, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("package_path"), PackagePath, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("asset_name"), AssetName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("parent_path"), ParentPath, OutError)) return nullptr;
 
             UMaterialInterface* Parent = LoadObject<UMaterialInterface>(nullptr, *ParentPath);
             if (!Parent) { MtlFail(OutError, FMCPError::InvalidParams, FString::Printf(TEXT("Could not load parent_path: %s"), *ParentPath)); return nullptr; }
@@ -302,8 +293,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
             FString PackagePath, AssetName;
-            if (!MtlRequireString(Params, TEXT("package_path"), PackagePath, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("asset_name"), AssetName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("package_path"), PackagePath, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("asset_name"), AssetName, OutError)) return nullptr;
 
             IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
             UMaterialFunctionFactoryNew* Factory = NewObject<UMaterialFunctionFactoryNew>();
@@ -484,7 +475,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             UMaterialInstanceConstant* MIC = MtlLoadTyped<UMaterialInstanceConstant>(Params, TEXT("instance_path"), OutError);
             if (!MIC) return nullptr;
-            FString Name; if (!MtlRequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
+            FString Name; if (!RequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
             double Value = 0.0;
             if (!Params->TryGetNumberField(TEXT("value"), Value)) { MtlFail(OutError, FMCPError::InvalidParams, TEXT("value (number) is required")); return nullptr; }
 
@@ -500,7 +491,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             UMaterialInstanceConstant* MIC = MtlLoadTyped<UMaterialInstanceConstant>(Params, TEXT("instance_path"), OutError);
             if (!MIC) return nullptr;
-            FString Name; if (!MtlRequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
+            FString Name; if (!RequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
             FLinearColor Value; if (!ReadLinearColor(Params, TEXT("value"), Value, OutError)) return nullptr;
 
             const bool bOk = UMaterialEditingLibrary::SetMaterialInstanceVectorParameterValue(MIC, FName(*Name), Value, ParseAssociation(Params));
@@ -516,8 +507,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UMaterialInstanceConstant* MIC = MtlLoadTyped<UMaterialInstanceConstant>(Params, TEXT("instance_path"), OutError);
             if (!MIC) return nullptr;
             FString Name, TexPath;
-            if (!MtlRequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("texture_path"), TexPath, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("texture_path"), TexPath, OutError)) return nullptr;
             UTexture* Tex = LoadObject<UTexture>(nullptr, *TexPath);
             if (!Tex) { MtlFail(OutError, FMCPError::InvalidParams, FString::Printf(TEXT("Could not load texture_path: %s"), *TexPath)); return nullptr; }
 
@@ -533,7 +524,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             UMaterialInstanceConstant* MIC = MtlLoadTyped<UMaterialInstanceConstant>(Params, TEXT("instance_path"), OutError);
             if (!MIC) return nullptr;
-            FString Name; if (!MtlRequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
+            FString Name; if (!RequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
             bool Value = false;
             if (!Params->TryGetBoolField(TEXT("value"), Value)) { MtlFail(OutError, FMCPError::InvalidParams, TEXT("value (bool) is required")); return nullptr; }
 
@@ -549,7 +540,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             UMaterialInstanceConstant* MIC = MtlLoadTyped<UMaterialInstanceConstant>(Params, TEXT("instance_path"), OutError);
             if (!MIC) return nullptr;
-            FString Name; if (!MtlRequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
+            FString Name; if (!RequireString(Params, TEXT("parameter_name"), Name, OutError)) return nullptr;
             bool bOverride = false;
             if (!Params->TryGetBoolField(TEXT("override"), bOverride)) { MtlFail(OutError, FMCPError::InvalidParams, TEXT("override (bool) is required")); return nullptr; }
 
@@ -565,7 +556,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             UMaterialInstanceConstant* MIC = MtlLoadTyped<UMaterialInstanceConstant>(Params, TEXT("instance_path"), OutError);
             if (!MIC) return nullptr;
-            FString ParentPath; if (!MtlRequireString(Params, TEXT("parent_path"), ParentPath, OutError)) return nullptr;
+            FString ParentPath; if (!RequireString(Params, TEXT("parent_path"), ParentPath, OutError)) return nullptr;
             UMaterialInterface* Parent = LoadObject<UMaterialInterface>(nullptr, *ParentPath);
             if (!Parent) { MtlFail(OutError, FMCPError::InvalidParams, FString::Printf(TEXT("Could not load parent_path: %s"), *ParentPath)); return nullptr; }
 
@@ -607,7 +598,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
-            FString ClassName; if (!MtlRequireString(Params, TEXT("expression_class"), ClassName, OutError)) return nullptr;
+            FString ClassName; if (!RequireString(Params, TEXT("expression_class"), ClassName, OutError)) return nullptr;
             UClass* ExprClass = ResolveExpressionClass(ClassName);
             if (!ExprClass) { MtlFail(OutError, FMCPError::InvalidParams, FString::Printf(TEXT("expression_class not found or not a UMaterialExpression: %s"), *ClassName)); return nullptr; }
 
@@ -645,8 +636,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
             FString GuidStr, PropName, Value;
-            if (!MtlRequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("property"), PropName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("property"), PropName, OutError)) return nullptr;
             if (!Params->TryGetStringField(TEXT("value"), Value)) { MtlFail(OutError, FMCPError::InvalidParams, TEXT("value is required")); return nullptr; }
 
             UMaterialExpression* Expr = ResolveExpression(Host, GuidStr, OutError);
@@ -664,8 +655,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
             FString FromGuid, ToGuid, FromOut, ToIn;
-            if (!MtlRequireString(Params, TEXT("from_guid"), FromGuid, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("to_guid"), ToGuid, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("from_guid"), FromGuid, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("to_guid"), ToGuid, OutError)) return nullptr;
             Params->TryGetStringField(TEXT("from_output"), FromOut);
             Params->TryGetStringField(TEXT("to_input"), ToIn);
 
@@ -686,8 +677,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UMaterial* Mat = MtlLoadTyped<UMaterial>(Params, TEXT("material_path"), OutError);
             if (!Mat) return nullptr;
             FString FromGuid, FromOut, PropStr;
-            if (!MtlRequireString(Params, TEXT("from_guid"), FromGuid, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("property"), PropStr, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("from_guid"), FromGuid, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("property"), PropStr, OutError)) return nullptr;
             Params->TryGetStringField(TEXT("from_output"), FromOut);
 
             EMaterialProperty Prop;
@@ -709,8 +700,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
             FString ToGuid, ToIn;
-            if (!MtlRequireString(Params, TEXT("to_guid"), ToGuid, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("to_input"), ToIn, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("to_guid"), ToGuid, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("to_input"), ToIn, OutError)) return nullptr;
 
             UMaterialExpression* To = ResolveExpression(Host, ToGuid, OutError); if (!To) return nullptr;
             const bool bBroken = UMaterialEditingLibrary::DisconnectMaterialExpressions(To, ToIn);
@@ -727,7 +718,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             UMaterial* Mat = MtlLoadTyped<UMaterial>(Params, TEXT("material_path"), OutError);
             if (!Mat) return nullptr;
-            FString PropStr; if (!MtlRequireString(Params, TEXT("property"), PropStr, OutError)) return nullptr;
+            FString PropStr; if (!RequireString(Params, TEXT("property"), PropStr, OutError)) return nullptr;
             EMaterialProperty Prop;
             if (!ParseMaterialProperty(PropStr, Prop)) { MtlFail(OutError, FMCPError::InvalidParams, FString::Printf(TEXT("unknown material property: %s"), *PropStr)); return nullptr; }
 
@@ -745,7 +736,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
-            FString GuidStr; if (!MtlRequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
+            FString GuidStr; if (!RequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
             UMaterialExpression* Expr = ResolveExpression(Host, GuidStr, OutError); if (!Expr) return nullptr;
 
             if (Host.Material) UMaterialEditingLibrary::DeleteMaterialExpression(Host.Material, Expr);
@@ -802,7 +793,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
-            FString Name; if (!MtlRequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
+            FString Name; if (!RequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
 
             int32 PosX = 0, PosY = 0;
             Params->TryGetNumberField(TEXT("pos_x"), PosX);
@@ -844,7 +835,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
-            FString DeclGuid; if (!MtlRequireString(Params, TEXT("declaration_guid"), DeclGuid, OutError)) return nullptr;
+            FString DeclGuid; if (!RequireString(Params, TEXT("declaration_guid"), DeclGuid, OutError)) return nullptr;
 
             UMaterialExpression* DeclExpr = ResolveExpression(Host, DeclGuid, OutError); if (!DeclExpr) return nullptr;
             UMaterialExpressionNamedRerouteDeclaration* Decl = Cast<UMaterialExpressionNamedRerouteDeclaration>(DeclExpr);
@@ -879,8 +870,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
             FString GuidStr, Name;
-            if (!MtlRequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
-            if (!MtlRequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
 
             UMaterialExpression* Expr = ResolveExpression(Host, GuidStr, OutError); if (!Expr) return nullptr;
             UMaterialExpressionNamedRerouteDeclaration* Decl = Cast<UMaterialExpressionNamedRerouteDeclaration>(Expr);
@@ -946,7 +937,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
-            FString Text; if (!MtlRequireString(Params, TEXT("text"), Text, OutError)) return nullptr;
+            FString Text; if (!RequireString(Params, TEXT("text"), Text, OutError)) return nullptr;
 
             int32 PosX = 0, PosY = 0, SizeX = 400, SizeY = 200, FontSize = 18;
             Params->TryGetNumberField(TEXT("pos_x"), PosX);
@@ -1025,7 +1016,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
             FString GuidStr, Text;
-            if (!MtlRequireString(Params, TEXT("comment_guid"), GuidStr, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("comment_guid"), GuidStr, OutError)) return nullptr;
             if (!Params->TryGetStringField(TEXT("text"), Text)) { MtlFail(OutError, FMCPError::InvalidParams, TEXT("text is required")); return nullptr; }
 
             UMaterialExpressionComment* Comment = ResolveComment(Host, GuidStr, OutError);
@@ -1042,7 +1033,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
-            FString GuidStr; if (!MtlRequireString(Params, TEXT("comment_guid"), GuidStr, OutError)) return nullptr;
+            FString GuidStr; if (!RequireString(Params, TEXT("comment_guid"), GuidStr, OutError)) return nullptr;
 
             UMaterialExpressionComment* Comment = ResolveComment(Host, GuidStr, OutError);
             if (!Comment) return nullptr;
@@ -1066,7 +1057,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             UObject* Obj = MtlLoadTyped<UObject>(Params, TEXT("object_path"), OutError);
             if (!Obj) return nullptr;
             FString PropName, Value;
-            if (!MtlRequireString(Params, TEXT("property"), PropName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("property"), PropName, OutError)) return nullptr;
             if (!Params->TryGetStringField(TEXT("value"), Value)) { MtlFail(OutError, FMCPError::InvalidParams, TEXT("value is required")); return nullptr; }
 
             if (!SetPropertyByReflection(Obj, PropName, Value, OutError)) return nullptr;
@@ -1116,7 +1107,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
-            FString GuidStr; if (!MtlRequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
+            FString GuidStr; if (!RequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
             int32 PosX = 0, PosY = 0;
             Params->TryGetNumberField(TEXT("pos_x"), PosX);
             Params->TryGetNumberField(TEXT("pos_y"), PosY);
@@ -1270,7 +1261,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
-            FString Text; if (!MtlRequireString(Params, TEXT("text"), Text, OutError)) return nullptr;
+            FString Text; if (!RequireString(Params, TEXT("text"), Text, OutError)) return nullptr;
             const TArray<TSharedPtr<FJsonValue>>* Guids = nullptr;
             if (!Params->TryGetArrayField(TEXT("node_guids"), Guids) || !Guids || Guids->Num() == 0)
             {
