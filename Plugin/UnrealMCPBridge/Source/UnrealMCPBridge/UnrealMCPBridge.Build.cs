@@ -39,6 +39,8 @@ public class UnrealMCPBridge : ModuleRules
             "BlueprintGraph",
             // Material authoring (UMaterialEditingLibrary lives in the MaterialEditor module)
             "MaterialEditor",
+            // Live node geometry (SGraphPanel::GetBoundsForNode) for graph layout queries
+            "GraphEditor",
             "LiveCoding",
             "LevelEditor",
             "PythonScriptPlugin",

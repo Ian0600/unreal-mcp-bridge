@@ -23,6 +23,13 @@
 #include "Engine/Texture.h"
 #include "UObject/UnrealType.h"
 
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "MaterialGraph/MaterialGraphNode.h"
+#include "GraphEditor.h"
+#include "SGraphPanel.h"
+#include "Framework/Application/SlateApplication.h"
+
 // Bring FMCPError into scope for both the anonymous-namespace helpers below and the
 // command lambdas in RegisterCommands (which reference FMCPError unqualified).
 using namespace MCPProtocol;
@@ -92,6 +99,77 @@ namespace
         if (Host.Material) return UMaterialEditingLibrary::GetMaterialExpressions(Host.Material);
         if (Host.Function) return UMaterialEditingLibrary::GetMaterialFunctionExpressions(Host.Function);
         return {};
+    }
+
+    // ---------- live node geometry ----------
+
+    // Expression node size is NOT stored on the asset (UMaterialExpression keeps only
+    // MaterialExpressionEditorX/Y). A node's width depends on its title text, pin names and
+    // preview thumbnail, so it only exists as the Slate widget's desired size while the graph is
+    // open in an asset editor.
+    //
+    // The editor does not edit the asset we loaded: FMaterialEditor duplicates the material /
+    // material function into the transient package and edits that, so the expressions reachable
+    // from the on-disk asset always have GraphNode == null. The duplicate keeps each expression's
+    // MaterialExpressionGuid, so we match through that instead of through object identity.
+    //
+    // Returns the panel whose graph contains any of the given guids, and fills OutNodes with the
+    // guid -> live graph node mapping. Null when no editor is showing this graph.
+    // Note: SGraphEditor keeps its SGraphPanel outside the widget tree reachable via
+    // GetChildren(), so the panel is fetched through SGraphEditor::GetGraphPanel() rather than
+    // found by walking children.
+    SGraphPanel* FindLiveNodesForExpressions(
+        const TSet<FGuid>& Guids,
+        TMap<FGuid, UEdGraphNode*>& OutNodes)
+    {
+        if (Guids.IsEmpty() || !FSlateApplication::IsInitialized()) return nullptr;
+
+        TArray<TSharedRef<SWindow>> Windows;
+        FSlateApplication::Get().GetAllVisibleWindowsOrdered(Windows);
+
+        SGraphPanel* Found = nullptr;
+        TFunction<void(const TSharedRef<SWidget>&)> Visit =
+            [&Found, &Guids, &OutNodes, &Visit](const TSharedRef<SWidget>& W)
+        {
+            if (Found) return;
+            if (W->GetType().ToString().StartsWith(TEXT("SGraphEditor")))
+            {
+                SGraphPanel* Panel = StaticCastSharedRef<SGraphEditor>(W)->GetGraphPanel();
+                if (Panel)
+                {
+                    if (const UEdGraph* Graph = Panel->GetGraphObj())
+                    {
+                        TMap<FGuid, UEdGraphNode*> Candidate;
+                        for (UEdGraphNode* Node : Graph->Nodes)
+                        {
+                            const UMaterialGraphNode* MatNode = Cast<UMaterialGraphNode>(Node);
+                            if (!MatNode || !MatNode->MaterialExpression) continue;
+                            const FGuid& G = MatNode->MaterialExpression->MaterialExpressionGuid;
+                            if (Guids.Contains(G)) Candidate.Add(G, Node);
+                        }
+                        if (Candidate.Num() > 0)
+                        {
+                            OutNodes = MoveTemp(Candidate);
+                            Found = Panel;
+                            return;
+                        }
+                    }
+                }
+            }
+            FChildren* Children = W->GetChildren();
+            const int32 NumChildren = Children ? Children->Num() : 0;
+            for (int32 i = 0; i < NumChildren && !Found; ++i)
+            {
+                Visit(Children->GetChildAt(i));
+            }
+        };
+
+        for (const TSharedRef<SWindow>& Win : Windows)
+        {
+            Visit(Win);
+            if (Found) break;
+        }
+        return Found;
     }
 
     // Ensures every expression carries a stable GUID we can hand back to callers, then returns it.
@@ -412,18 +490,31 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         });
 
     // material.list_expressions — Params: material_path OR function_path. Returns each node's guid,
-    // class, grid position, and input/output pin names.
+    // class, grid position, input/output pin names, and — when the asset editor is open — the
+    // node's rendered size_x/size_y (see FindGraphPanelForGraph for why size needs a live editor).
     Registry.Register(TEXT("material.list_expressions"),
         [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
             FGraphHost Host = LoadGraphHost(Params, OutError);
             if (!Host.IsValid()) return nullptr;
 
+            TArray<UMaterialExpression*> Expressions = MtlGetExpressions(Host);
+
+            // Resolve every guid up front so the widget tree is walked once, not per node.
+            TSet<FGuid> Guids;
+            Guids.Reserve(Expressions.Num());
+            for (UMaterialExpression* Expr : Expressions)
+            {
+                if (Expr) Guids.Add(EnsureExpressionGuid(Expr));
+            }
+            TMap<FGuid, UEdGraphNode*> LiveNodes;
+            SGraphPanel* Panel = FindLiveNodesForExpressions(Guids, LiveNodes);
+
             TArray<TSharedPtr<FJsonValue>> Arr;
-            for (UMaterialExpression* Expr : MtlGetExpressions(Host))
+            for (UMaterialExpression* Expr : Expressions)
             {
                 if (!Expr) continue;
-                const FGuid Guid = EnsureExpressionGuid(Expr);
+                const FGuid Guid = Expr->MaterialExpressionGuid;
 
                 int32 X = 0, Y = 0;
                 UMaterialEditingLibrary::GetMaterialExpressionNodePosition(Expr, X, Y);
@@ -433,6 +524,19 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 O->SetStringField(TEXT("class"), Expr->GetClass()->GetName());
                 O->SetNumberField(TEXT("pos_x"), X);
                 O->SetNumberField(TEXT("pos_y"), Y);
+
+                if (Panel)
+                {
+                    if (UEdGraphNode* const* LiveNode = LiveNodes.Find(Guid))
+                    {
+                        FVector2f MinCorner(ForceInitToZero), MaxCorner(ForceInitToZero);
+                        if (Panel->GetBoundsForNode(*LiveNode, MinCorner, MaxCorner))
+                        {
+                            O->SetNumberField(TEXT("size_x"), FMath::RoundToInt(MaxCorner.X - MinCorner.X));
+                            O->SetNumberField(TEXT("size_y"), FMath::RoundToInt(MaxCorner.Y - MinCorner.Y));
+                        }
+                    }
+                }
 
                 TArray<TSharedPtr<FJsonValue>> Ins, Outs;
                 for (const FString& S : UMaterialEditingLibrary::GetMaterialExpressionInputNames(Expr)) Ins.Add(MakeShared<FJsonValueString>(S));
@@ -444,6 +548,8 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 
             auto Result = MakeShared<FJsonObject>();
             Result->SetArrayField(TEXT("expressions"), Arr);
+            // Lets callers distinguish "no sizes because the editor is closed" from "no nodes".
+            Result->SetBoolField(TEXT("sizes_available"), Panel != nullptr);
             return Result;
         });
 

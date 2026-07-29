@@ -60,7 +60,12 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         material_path: str | None = None,
         function_path: str | None = None,
     ) -> dict:
-        """List graph expression nodes (guid, class, position, pin names). Pass exactly one path."""
+        """List graph expression nodes (guid, class, position, pin names). Pass exactly one path.
+
+        Each node also carries size_x/size_y when the asset editor for that material/function is
+        open — node size is the Slate widget's rendered size and does not exist otherwise. The
+        result's `sizes_available` flag tells you which case you got.
+        """
         return conn.call("material.list_expressions", _graph_host(material_path, function_path))
 
     @mcp.tool()
