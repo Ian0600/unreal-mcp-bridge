@@ -71,6 +71,13 @@ Example usage: `-32000` for "Editor not ready", `-32001` for "Asset not found".
 
 ## Method Catalogue
 
+The tables below cover the core domains in detail. The bridge also serves `animgraph.*`,
+`animnotify.*`, `statetree.*`, `camerarig.*`, `camvar.*`, `material.*` and `niagara.*`, which are
+documented by the docstrings on their `@mcp.tool()` wrappers in
+`Python/unreal_mcp_bridge/tools/`. The authoritative list of methods is the set of
+`Registry.Register(TEXT("..."))` calls under
+`Plugin/UnrealMCPBridge/Source/UnrealMCPBridge/Private/Commands/`.
+
 ### editor.*
 
 | Method                  | Params                                               | Result fields                                                                             | Description                                      |
@@ -121,6 +128,8 @@ Example usage: `-32000` for "Editor not ready", `-32001` for "Asset not found".
 | `blueprint.create`           | `package_path: string, asset_name: string, parent_class_path: string` | `blueprint_path: string`                               | Creates a new Blueprint asset                  |
 | `blueprint.compile`          | `blueprint_path: string`                                               | `success: bool, error_count: int, warning_count: int`  | Compiles a Blueprint asset                     |
 | `blueprint.list_variables`   | `blueprint_path: string`                                               | `variables: [{name, type, category}]`                  | Lists NewVariables declared in a Blueprint     |
+| `blueprint.list_functions`   | `blueprint_path: string, graph_name?: string`                          | `graphs: [{name, graph_type, node_count, inputs?, outputs?}]` | Graph inventory with function signatures |
+| `blueprint.get_graph_nodes`  | `blueprint_path: string, graph_name?: string`                          | `graphs: [{name, type, nodes: [{name, class, title, pos_x, pos_y, pins}]}]` | Full node/pin/link dump of a graph |
 
 **blueprint.create example**
 ```json
@@ -144,6 +153,24 @@ Example usage: `-32000` for "Editor not ready", `-32001` for "Asset not found".
 { "method": "blueprint.list_variables", "params": { "blueprint_path": "/Game/Blueprints/BP_MyActor.BP_MyActor_C" } }
 // result
 { "variables": [ { "name": "Health", "type": "float", "category": "Stats" } ] }
+```
+
+**blueprint.list_functions example**
+
+`inputs` / `outputs` are only present on graphs that have function entry / result nodes — an
+event graph has neither, and an empty array there would read as "takes nothing, returns nothing".
+```json
+// request
+{ "method": "blueprint.list_functions", "params": { "blueprint_path": "/Game/Blueprints/BP_MyActor.BP_MyActor" } }
+// result
+{
+  "graphs": [
+    { "name": "EventGraph", "graph_type": "ubergraph", "node_count": 24 },
+    { "name": "ApplyDamage", "graph_type": "function", "node_count": 7,
+      "inputs": [ { "name": "Amount", "type": "float" } ],
+      "outputs": [ { "name": "Killed", "type": "bool" } ] }
+  ]
+}
 ```
 
 ---

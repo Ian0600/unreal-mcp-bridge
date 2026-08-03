@@ -7,6 +7,45 @@ from ..connection import UnrealConnection
 
 def register_statetree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
     @mcp.tool()
+    def statetree_list_states(tree_path: str) -> dict:
+        """Dumps a StateTree's state hierarchy — read this before editing. Sibling order decides
+        which state wins (the first one whose conditions pass), so where to insert cannot be
+        chosen without seeing the existing order, and the asset's EditorData is protected, so
+        editor Python cannot read it either.
+
+        Each entry is {id, name, tasks[], enter_conditions[], transitions[], children[]}. Task
+        and condition entries are full struct paths, the same strings statetree_add_task /
+        statetree_add_condition take. A transition is {id, trigger (raw enum bits), target,
+        condition_count}. Returns {"states": [...]} with one entry per root subtree."""
+        if not tree_path:
+            raise ValueError("tree_path is required")
+        return conn.call("statetree.list_states", {"tree_path": tree_path})
+
+    @mcp.tool()
+    def statetree_move_state(
+        tree_path: str,
+        state_id: str,
+        index: int = -1,
+        parent_state_id: str | None = None,
+    ) -> dict:
+        """Reorders a state among its siblings, optionally reparenting it. statetree_add_state
+        always appends, and an unconditional sibling ahead of the new state means it is never
+        selected — so a freshly added state usually has to be moved to be worth anything.
+
+        index is 0-based; -1 or past the end means last. parent_state_id has three cases:
+        omitted keeps the current parent (pure reorder), "" moves the state to the root subtree
+        list, and a GUID reparents under that state. Moving a state under itself or its own
+        descendant is refused. Returns {"moved","parent","index"}."""
+        if not tree_path:
+            raise ValueError("tree_path is required")
+        if not state_id:
+            raise ValueError("state_id is required")
+        params: dict = {"tree_path": tree_path, "state_id": state_id, "index": index}
+        if parent_state_id is not None:
+            params["parent_state_id"] = parent_state_id
+        return conn.call("statetree.move_state", params)
+
+    @mcp.tool()
     def statetree_add_state(
         tree_path: str,
         state_name: str,
