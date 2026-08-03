@@ -1,4 +1,5 @@
 #include "Commands/CameraRigCommands.h"
+#include "Commands/CommandJsonHelpers.h"
 #include "MCPCommandRegistry.h"
 #include "MCPProtocol.h"
 #include "Dom/JsonObject.h"
@@ -9,6 +10,8 @@
 
 namespace
 {
+    using UnrealMCPBridge::Json::RequireString;
+
     UCameraRigAsset* LoadRig(const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError)
     {
         FString Path;
@@ -25,17 +28,6 @@ namespace
             OutError.Message = FString::Printf(TEXT("Could not load CameraRigAsset: %s"), *Path);
         }
         return Rig;
-    }
-
-    bool RequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, MCPProtocol::FMCPError& OutError)
-    {
-        if (!Params->TryGetStringField(Field, Out) || Out.IsEmpty())
-        {
-            OutError.Code = MCPProtocol::FMCPError::InvalidParams;
-            OutError.Message = FString::Printf(TEXT("%s is required and must be non-empty"), Field);
-            return false;
-        }
-        return true;
     }
 
     // Collects every UCameraNode instanced under the rig (connected or loose), in discovery order.

@@ -32,6 +32,10 @@
     {
       "Name": "GameplayCameras",
       "Enabled": true
+    },
+    {
+      "Name": "Niagara",
+      "Enabled": true
     }
   ]
 }

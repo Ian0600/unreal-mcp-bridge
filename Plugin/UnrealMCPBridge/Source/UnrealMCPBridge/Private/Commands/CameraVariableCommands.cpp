@@ -1,4 +1,5 @@
 #include "Commands/CameraVariableCommands.h"
+#include "Commands/CommandJsonHelpers.h"
 #include "MCPCommandRegistry.h"
 #include "MCPProtocol.h"
 #include "Dom/JsonObject.h"
@@ -10,6 +11,8 @@
 
 namespace
 {
+    using UnrealMCPBridge::Json::RequireString;
+
     UCameraVariableCollection* LoadCollection(const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError)
     {
         FString Path;
@@ -26,17 +29,6 @@ namespace
             OutError.Message = FString::Printf(TEXT("Could not load CameraVariableCollection: %s"), *Path);
         }
         return Coll;
-    }
-
-    bool RequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, MCPProtocol::FMCPError& OutError)
-    {
-        if (!Params->TryGetStringField(Field, Out) || Out.IsEmpty())
-        {
-            OutError.Code = MCPProtocol::FMCPError::InvalidParams;
-            OutError.Message = FString::Printf(TEXT("%s is required and must be non-empty"), Field);
-            return false;
-        }
-        return true;
     }
 
     // Resolves a short variable type ("Vector3d", "Double", "Boolean", ...) to its concrete

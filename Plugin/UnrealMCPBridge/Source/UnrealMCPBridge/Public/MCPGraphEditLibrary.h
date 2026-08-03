@@ -190,6 +190,16 @@ public:
         int32 PosX,
         int32 PosY);
 
+    // Rebuilds a blend space's interpolation data (triangulation / grid) from its current SampleData.
+    //
+    // Needed because UBlendSpace::PostEditChangeProperty does NOT resample: editing SampleData only
+    // empties GridSamples, and the rebuild lives in the blend space *editor UI*. So a blend space
+    // authored from script (set_editor_property on BlendParameters/SampleData) has samples but no
+    // interpolation data, and evaluates to the reference pose — the animation silently never plays.
+    // Call this once after writing the samples.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Anim", meta = (DevelopmentOnly))
+    static bool RebuildBlendSpace(UBlendSpace* BlendSpace);
+
     // Adds a plain (non-blend-space) SequencePlayer node inside StateName's bound graph, sets its
     // Sequence asset and loop flag, and wires its pose output to the state's Output Animation Pose
     // sink. Use for one-shot transition animations (Start/Stop clips) inside a dedicated state.

@@ -1,4 +1,5 @@
 #include "Commands/AnimGraphCommands.h"
+#include "Commands/CommandJsonHelpers.h"
 #include "MCPCommandRegistry.h"
 #include "MCPProtocol.h"
 #include "MCPGraphEditLibrary.h"
@@ -7,6 +8,8 @@
 
 namespace
 {
+    using UnrealMCPBridge::Json::RequireString;
+
     // Loads and casts blueprint_path to UAnimBlueprint, or sets OutError and returns null.
     UAnimBlueprint* LoadRequiredAnimBlueprint(const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError)
     {
@@ -33,17 +36,6 @@ namespace
             return nullptr;
         }
         return AnimBP;
-    }
-
-    bool RequireStringField(const TSharedPtr<FJsonObject>& Params, const TCHAR* FieldName, FString& OutValue, MCPProtocol::FMCPError& OutError)
-    {
-        if (!Params->TryGetStringField(FieldName, OutValue) || OutValue.IsEmpty())
-        {
-            OutError.Code = MCPProtocol::FMCPError::InvalidParams;
-            OutError.Message = FString::Printf(TEXT("%s is required and must be non-empty"), FieldName);
-            return false;
-        }
-        return true;
     }
 
     int32 GetIntFieldOrDefault(const TSharedPtr<FJsonObject>& Params, const TCHAR* FieldName, int32 Default)
@@ -90,8 +82,8 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString StateMachineNode, StateName;
-            if (!RequireStringField(Params, TEXT("state_machine_node"), StateMachineNode, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("state_name"), StateName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("state_machine_node"), StateMachineNode, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("state_name"), StateName, OutError)) return nullptr;
 
             FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("AnimGraph");
             const int32 PosX = GetIntFieldOrDefault(Params, TEXT("pos_x"), 0);
@@ -120,9 +112,9 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString StateMachineNode, StateName, BlendSpacePath;
-            if (!RequireStringField(Params, TEXT("state_machine_node"), StateMachineNode, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("state_name"), StateName, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("blend_space_path"), BlendSpacePath, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("state_machine_node"), StateMachineNode, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("state_name"), StateName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("blend_space_path"), BlendSpacePath, OutError)) return nullptr;
 
             FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("AnimGraph");
             const int32 PosX = GetIntFieldOrDefault(Params, TEXT("pos_x"), 0);
@@ -152,9 +144,9 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString StateMachineNode, FromState, ToState;
-            if (!RequireStringField(Params, TEXT("state_machine_node"), StateMachineNode, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("from_state"), FromState, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("to_state"), ToState, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("state_machine_node"), StateMachineNode, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("from_state"), FromState, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("to_state"), ToState, OutError)) return nullptr;
 
             FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("AnimGraph");
             FString ConditionProperty;
@@ -186,8 +178,8 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString GraphName, PropertyName;
-            if (!RequireStringField(Params, TEXT("graph_name"), GraphName, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("property_name"), PropertyName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("graph_name"), GraphName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("property_name"), PropertyName, OutError)) return nullptr;
 
             const int32 PosX = GetIntFieldOrDefault(Params, TEXT("pos_x"), 0);
             const int32 PosY = GetIntFieldOrDefault(Params, TEXT("pos_y"), 0);
@@ -214,11 +206,11 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString GraphName, SrcNode, SrcPin, DstNode, DstPin;
-            if (!RequireStringField(Params, TEXT("graph_name"), GraphName, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("src_node"), SrcNode, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("src_pin"), SrcPin, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("dst_node"), DstNode, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("dst_pin"), DstPin, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("graph_name"), GraphName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("src_node"), SrcNode, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("src_pin"), SrcPin, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("dst_node"), DstNode, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("dst_pin"), DstPin, OutError)) return nullptr;
 
             const bool bOk = UMCPGraphEditLibrary::ConnectPins(AnimBP, GraphName, SrcNode, SrcPin, DstNode, DstPin);
             if (!bOk)
@@ -242,11 +234,11 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString GraphName, NodeA, PinA, NodeB, PinB;
-            if (!RequireStringField(Params, TEXT("graph_name"), GraphName, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("node_a"), NodeA, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("pin_a"), PinA, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("node_b"), NodeB, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("pin_b"), PinB, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("graph_name"), GraphName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("node_a"), NodeA, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("pin_a"), PinA, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("node_b"), NodeB, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("pin_b"), PinB, OutError)) return nullptr;
 
             const bool bOk = UMCPGraphEditLibrary::DisconnectPinLink(AnimBP, GraphName, NodeA, PinA, NodeB, PinB);
             if (!bOk)
@@ -272,9 +264,9 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString StateMachineNode, StateName, SequencePath;
-            if (!RequireStringField(Params, TEXT("state_machine_node"), StateMachineNode, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("state_name"), StateName, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("sequence_path"), SequencePath, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("state_machine_node"), StateMachineNode, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("state_name"), StateName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("sequence_path"), SequencePath, OutError)) return nullptr;
 
             FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("AnimGraph");
             bool bLoop = true;
@@ -306,7 +298,7 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString SlotName;
-            if (!RequireStringField(Params, TEXT("slot_name"), SlotName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("slot_name"), SlotName, OutError)) return nullptr;
 
             FString GraphName = Params->HasField(TEXT("graph_name")) ? Params->GetStringField(TEXT("graph_name")) : TEXT("AnimGraph");
             const int32 PosX = GetIntFieldOrDefault(Params, TEXT("pos_x"), 0);
@@ -334,8 +326,8 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!AnimBP) return nullptr;
 
             FString GraphName, NodeName;
-            if (!RequireStringField(Params, TEXT("graph_name"), GraphName, OutError)) return nullptr;
-            if (!RequireStringField(Params, TEXT("node_name"), NodeName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("graph_name"), GraphName, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("node_name"), NodeName, OutError)) return nullptr;
 
             const bool bOk = UMCPGraphEditLibrary::RemoveNode(AnimBP, GraphName, NodeName);
             if (!bOk)

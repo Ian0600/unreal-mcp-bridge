@@ -823,6 +823,22 @@ FString UMCPGraphEditLibrary::AddBlendSpacePlayerToState(
     return BSNode->GetName();
 }
 
+bool UMCPGraphEditLibrary::RebuildBlendSpace(UBlendSpace* BlendSpace)
+{
+    if (!BlendSpace)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("RebuildBlendSpace: BlendSpace is null"));
+        return false;
+    }
+
+    // ResampleData validates the samples against the current axis ranges and then rebuilds the
+    // interpolation data (triangulation, or the grid when bInterpolateUsingGrid). Set the axes
+    // *before* the samples when authoring, or out-of-range samples are marked invalid here.
+    BlendSpace->ResampleData();
+    BlendSpace->MarkPackageDirty();
+    return true;
+}
+
 FString UMCPGraphEditLibrary::AddSequencePlayerToState(
     UAnimBlueprint* AnimBlueprint,
     const FString& GraphName,

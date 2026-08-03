@@ -37,6 +37,10 @@ public class UnrealMCPBridge : ModuleRules
             "Kismet",
             "KismetCompiler",
             "BlueprintGraph",
+            // Material authoring (UMaterialEditingLibrary lives in the MaterialEditor module)
+            "MaterialEditor",
+            // Live node geometry (SGraphPanel::GetBoundsForNode) for graph layout queries
+            "GraphEditor",
             "LiveCoding",
             "LevelEditor",
             "PythonScriptPlugin",
@@ -48,6 +52,11 @@ public class UnrealMCPBridge : ModuleRules
             "PropertyBindingUtils",
             // Gameplay Camera System rig editing (node inspection + property tuning)
             "GameplayCameras",
+            // Niagara module stack authoring. NiagaraEditor exports its stack view models in
+            // full, which is why the commands go through those rather than the mostly
+            // unexported FNiagaraStackGraphUtilities free functions.
+            "Niagara",
+            "NiagaraEditor",
         });
     }
 }

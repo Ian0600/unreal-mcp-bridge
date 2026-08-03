@@ -4,12 +4,33 @@
 #include "Dom/JsonValue.h"
 #include "GameFramework/Actor.h"
 #include "AssetRegistry/AssetData.h"
+#include "MCPProtocol.h"
 
 // Forward declaration — FBPVariableDescription is a Kismet struct, include it where needed.
 struct FBPVariableDescription;
 
 namespace UnrealMCPBridge::Json
 {
+    /**
+     * Reads a required non-empty string field, filling OutError and returning false if it is
+     * missing, empty, or the params object itself is null.
+     *
+     * Lives here rather than in each command file's anonymous namespace: every handler needs the
+     * same check, and UBT's unity build merges those files into one translation unit, where five
+     * identical definitions become a redefinition error. Renaming per file (MtlRequireString,
+     * RigRequireString, ...) dodged that twice; one shared definition removes the hazard instead.
+     */
+    inline bool RequireString(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FString& Out, MCPProtocol::FMCPError& OutError)
+    {
+        if (!Params.IsValid() || !Params->TryGetStringField(Field, Out) || Out.IsEmpty())
+        {
+            OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+            OutError.Message = FString::Printf(TEXT("%s is required and must be non-empty"), Field);
+            return false;
+        }
+        return true;
+    }
+
     /**
      * Builds a JSON object representing a single actor.
      * Fields: "name" (string), "class" (string), "location" ([x,y,z] number array).
