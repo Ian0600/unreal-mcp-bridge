@@ -23,6 +23,9 @@
 #include "IContentBrowserSingleton.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
+#include "Animation/AnimSequence.h"
+#include "Rendering/SkeletalMeshModel.h"
+#include "Rendering/SkeletalMeshLODModel.h"
 
 // Import
 #include "AssetImportTask.h"
@@ -109,6 +112,39 @@ namespace
             return true;
         }
         return Actor->FindComponentByClass<UBrushComponent>() != nullptr;
+    }
+
+    // Counts LOD0 sections that are driven by cloth simulation.
+    //
+    // This matters because the engine's FBX exporter drops them on purpose:
+    // FFbxExporter::CreateMesh builds its vertex list from
+    // FSkeletalMeshLODModel::GetNonClothVertices(), so a mesh whose body is cloth-simulated
+    // exports as the leftover non-cloth sections and nothing reports the loss. A caller who
+    // only checks "did I get a file" ships half a character. There is no UFbxExportOption
+    // switch to change this, so the honest move is to count them and say so.
+    void LevelIOCountClothSections(const USkeletalMesh* SkelMesh, int32& OutCloth, int32& OutTotal)
+    {
+        OutCloth = 0;
+        OutTotal = 0;
+        if (!SkelMesh)
+        {
+            return;
+        }
+
+        const FSkeletalMeshModel* Model = SkelMesh->GetImportedModel();
+        if (!Model || !Model->LODModels.IsValidIndex(0))
+        {
+            return;
+        }
+
+        OutTotal = Model->LODModels[0].Sections.Num();
+        for (int32 SectionIndex = 0; SectionIndex < OutTotal; ++SectionIndex)
+        {
+            if (SkelMesh->IsSectionUsingCloth(SectionIndex))
+            {
+                ++OutCloth;
+            }
+        }
     }
 
     // Ensures the parent directory of a file path exists. Returns false when it cannot be created.
@@ -318,6 +354,12 @@ void FLevelIOCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             bool bIncludeMorphTargets = true;
             Params->TryGetBoolField(TEXT("include_morph_targets"), bIncludeMorphTargets);
 
+            // Animation exports carry the skeleton but not the geometry unless this is on.
+            // Default on: a bare skeleton is rarely what a DCC round trip wants, and the
+            // extra mesh is what lets an artist see the motion on the character in Maya.
+            bool bExportPreviewMesh = true;
+            Params->TryGetBoolField(TEXT("export_preview_mesh"), bExportPreviewMesh);
+
             // Resolve what to export: explicit paths win over the Content Browser selection.
             TArray<FString> RequestedPaths;
             FString SingleObjectPath;
@@ -401,13 +443,44 @@ void FLevelIOCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                     continue;
                 }
 
-                // Restricting to mesh types keeps the failure mode legible: everything else would
-                // either find no FBX exporter or emit something the caller did not ask for.
-                if (!Asset->IsA<UStaticMesh>() && !Asset->IsA<USkeletalMesh>())
+                // Restricting to the types with a registered FBX exporter keeps the failure mode
+                // legible: everything else would either find no exporter or emit something the
+                // caller did not ask for.
+                if (!Asset->IsA<UStaticMesh>() && !Asset->IsA<USkeletalMesh>() && !Asset->IsA<UAnimSequence>())
                 {
                     AddSkipped(ObjectPath, FString::Printf(
-                        TEXT("%s is not a StaticMesh or SkeletalMesh"), *Asset->GetClass()->GetName()));
+                        TEXT("%s is not a StaticMesh, SkeletalMesh or AnimSequence"),
+                        *Asset->GetClass()->GetName()));
                     continue;
+                }
+
+                // UAnimSequenceExporterFBX needs both a skeleton and a preview mesh; without
+                // them it logs a warning and returns false, which would surface here as a bare
+                // "export failed" with no way to tell why. Check up front and say which is
+                // missing — the fix (assign a preview mesh on the skeleton) is not obvious.
+                if (const UAnimSequence* AnimSeq = Cast<UAnimSequence>(Asset))
+                {
+                    USkeleton* AnimSkeleton = AnimSeq->GetSkeleton();
+                    if (!AnimSkeleton)
+                    {
+                        AddSkipped(ObjectPath, TEXT("AnimSequence has no skeleton assigned"));
+                        continue;
+                    }
+
+                    USkeletalMesh* PreviewMesh =
+                        AnimSkeleton->GetAssetPreviewMesh(const_cast<UAnimSequence*>(AnimSeq));
+                    if (!PreviewMesh)
+                    {
+                        PreviewMesh = AnimSkeleton->FindCompatibleMesh();
+                    }
+                    if (!PreviewMesh)
+                    {
+                        AddSkipped(ObjectPath, FString::Printf(
+                            TEXT("no preview mesh available for skeleton %s — assign one on the ")
+                            TEXT("skeleton or the animation before exporting"),
+                            *AnimSkeleton->GetName()));
+                        continue;
+                    }
                 }
 
                 const FString OutFile = bPathIsFile
@@ -415,10 +488,11 @@ void FLevelIOCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                     : FPaths::Combine(FullPath, Asset->GetName() + TEXT(".fbx"));
 
                 UFbxExportOption* ExportOptions = NewObject<UFbxExportOption>();
-                ExportOptions->bASCII             = bAscii ? 1 : 0;
-                ExportOptions->Collision          = bIncludeCollision ? 1 : 0;
-                ExportOptions->LevelOfDetail      = bIncludeLods ? 1 : 0;
+                ExportOptions->bASCII              = bAscii ? 1 : 0;
+                ExportOptions->Collision           = bIncludeCollision ? 1 : 0;
+                ExportOptions->LevelOfDetail       = bIncludeLods ? 1 : 0;
                 ExportOptions->bExportMorphTargets = bIncludeMorphTargets ? 1 : 0;
+                ExportOptions->bExportPreviewMesh  = bExportPreviewMesh ? 1 : 0;
 
                 FString ExportMessage;
                 if (!LevelIORunFbxExport(Asset, OutFile, /*bSelectedOnly=*/false, ExportOptions, ExportMessage))
@@ -433,6 +507,35 @@ void FLevelIOCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 Entry->SetStringField(TEXT("class"),       Asset->GetClass()->GetName());
                 Entry->SetNumberField(TEXT("size_bytes"),
                     static_cast<double>(IFileManager::Get().FileSize(*OutFile)));
+
+                // Report geometry the engine dropped on the floor. Silence here is what let a
+                // half-exported character look like a success.
+                if (const USkeletalMesh* SkelMesh = Cast<USkeletalMesh>(Asset))
+                {
+                    int32 ClothSections = 0;
+                    int32 TotalSections = 0;
+                    LevelIOCountClothSections(SkelMesh, ClothSections, TotalSections);
+
+                    Entry->SetNumberField(TEXT("sections"),        static_cast<double>(TotalSections));
+                    Entry->SetNumberField(TEXT("cloth_sections_excluded"), static_cast<double>(ClothSections));
+                    if (ClothSections > 0)
+                    {
+                        Entry->SetStringField(TEXT("warning"), FString::Printf(
+                            TEXT("%d of %d LOD0 sections use cloth simulation and were EXCLUDED by ")
+                            TEXT("Unreal's FBX exporter — the exported mesh is incomplete. This is an ")
+                            TEXT("engine limitation with no export option to override it."),
+                            ClothSections, TotalSections));
+                    }
+                }
+                else if (Asset->IsA<UAnimSequence>())
+                {
+                    Entry->SetBoolField(TEXT("preview_mesh_included"), bExportPreviewMesh);
+                    Entry->SetStringField(TEXT("warning"),
+                        TEXT("FBX carries skeleton and curves only: anim notifies, sync markers and ")
+                        TEXT("custom curves are Unreal-side data and are lost on round trip. ")
+                        TEXT("Additive animations export as raw poses, not deltas."));
+                }
+
                 Exported.Add(MakeShared<FJsonValueObject>(Entry));
             }
 
@@ -675,6 +778,42 @@ void FLevelIOCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             Result->SetStringField(TEXT("actor_name"), Spawned->GetActorNameOrLabel());
             Result->SetStringField(TEXT("class"),      Spawned->GetClass()->GetName());
             Result->SetStringField(TEXT("actor_path"), Spawned->GetPathName());
+            return Result;
+        });
+
+    // level.get_selection — which actors are selected in the level viewport.
+    //
+    // Pairs with level.export_selected: check what will be exported before writing a file.
+    // Note this is a different selection from asset.get_selection — an artist picking a mesh
+    // in the Content Browser selects an asset and leaves the level selection empty.
+    Registry.Register(TEXT("level.get_selection"),
+        [](const TSharedPtr<FJsonObject>& /*Params*/, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            if (!GEditor)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InternalError;
+                OutError.Message = TEXT("GEditor is not available");
+                return nullptr;
+            }
+
+            TArray<AActor*> Actors;
+            if (USelection* Selection = GEditor->GetSelectedActors())
+            {
+                Selection->GetSelectedObjects<AActor>(Actors);
+            }
+
+            TArray<TSharedPtr<FJsonValue>> ActorArray;
+            for (AActor* Actor : Actors)
+            {
+                if (Actor)
+                {
+                    ActorArray.Add(MakeShared<FJsonValueObject>(UnrealMCPBridge::Json::MakeActorJson(Actor)));
+                }
+            }
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("count"), static_cast<double>(ActorArray.Num()));
+            Result->SetArrayField(TEXT("actors"), ActorArray);
             return Result;
         });
 }

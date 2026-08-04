@@ -34,6 +34,8 @@ public class UnrealMCPBridge : ModuleRules
             "EditorScriptingUtilities",
             "AssetRegistry",
             "AssetTools",
+            // UEditorUtilityLibrary::GetSelectedAssetData for asset.get_selection
+            "Blutility",
             // Content Browser asset selection, so asset.export_fbx can act on what the user
             // has highlighted rather than requiring explicit object paths
             "ContentBrowser",

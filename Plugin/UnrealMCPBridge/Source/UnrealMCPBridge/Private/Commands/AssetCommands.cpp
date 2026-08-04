@@ -6,6 +6,8 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/AssetData.h"
 #include "EditorAssetLibrary.h"
+#include "EditorUtilityLibrary.h"
+#include "Editor.h"
 
 void FAssetCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
@@ -114,6 +116,97 @@ void FAssetCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 
             auto Result = MakeShared<FJsonObject>();
             Result->SetBoolField(TEXT("saved"), bSaved);
+            return Result;
+        });
+
+    // asset.get_selection — what is currently selected in the Content Browser.
+    //
+    // Distinct from level.get_selection: an artist picking a SkeletalMesh in the Content
+    // Browser selects an *asset*, which never shows up in GEditor->GetSelectedActors().
+    // Without this, callers had to shell out to editor.python_exec to answer "what did the
+    // user pick?", which is both slower and unavailable when Python scripting is disabled.
+    Registry.Register(TEXT("asset.get_selection"),
+        [](const TSharedPtr<FJsonObject>& /*Params*/, MCPProtocol::FMCPError& /*OutError*/) -> TSharedPtr<FJsonObject>
+        {
+            const TArray<FAssetData> Selected = UEditorUtilityLibrary::GetSelectedAssetData();
+
+            TArray<TSharedPtr<FJsonValue>> AssetArray;
+            for (const FAssetData& Asset : Selected)
+            {
+                AssetArray.Add(MakeShared<FJsonValueObject>(UnrealMCPBridge::Json::MakeAssetJson(Asset)));
+            }
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("count"), static_cast<double>(Selected.Num()));
+            Result->SetArrayField(TEXT("assets"), AssetArray);
+            return Result;
+        });
+
+    // asset.set_selection — select assets in the Content Browser by object path.
+    // Params: object_paths (required, array of strings), focus (optional bool, default true).
+    //
+    // Paths that do not resolve are reported in "not_found" rather than failing the whole
+    // call: selecting four of five assets is more useful than an error naming one of them.
+    Registry.Register(TEXT("asset.set_selection"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            if (!Params.IsValid())
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = TEXT("params object is required");
+                return nullptr;
+            }
+
+            const TArray<TSharedPtr<FJsonValue>>* PathValues = nullptr;
+            if (!Params->TryGetArrayField(TEXT("object_paths"), PathValues) || PathValues == nullptr)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = TEXT("object_paths is required and must be an array of strings");
+                return nullptr;
+            }
+
+            if (!GEditor)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InternalError;
+                OutError.Message = TEXT("GEditor is not available");
+                return nullptr;
+            }
+
+            bool bFocus = true;
+            Params->TryGetBoolField(TEXT("focus"), bFocus);
+
+            IAssetRegistry& AssetRegistry =
+                FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+
+            TArray<FAssetData> ToSync;
+            TArray<TSharedPtr<FJsonValue>> NotFound;
+            for (const TSharedPtr<FJsonValue>& Value : *PathValues)
+            {
+                FString ObjectPath;
+                if (!Value.IsValid() || !Value->TryGetString(ObjectPath) || ObjectPath.IsEmpty())
+                {
+                    continue;
+                }
+
+                const FAssetData Asset = AssetRegistry.GetAssetByObjectPath(FSoftObjectPath(ObjectPath));
+                if (Asset.IsValid())
+                {
+                    ToSync.Add(Asset);
+                }
+                else
+                {
+                    NotFound.Add(MakeShared<FJsonValueString>(ObjectPath));
+                }
+            }
+
+            if (ToSync.Num() > 0)
+            {
+                GEditor->SyncBrowserToObjects(ToSync, bFocus);
+            }
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("selected"), static_cast<double>(ToSync.Num()));
+            Result->SetArrayField(TEXT("not_found"), NotFound);
             return Result;
         });
 }
