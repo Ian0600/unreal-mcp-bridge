@@ -17,6 +17,7 @@ from .tools import (
     register_camvar_tools,
     register_material_tools,
     register_niagara_tools,
+    register_levelio_tools,
 )
 
 
@@ -38,6 +39,7 @@ def main() -> None:
     register_camvar_tools(mcp, conn)
     register_material_tools(mcp, conn)
     register_niagara_tools(mcp, conn)
+    register_levelio_tools(mcp, conn)
 
     try:
         mcp.run(transport="stdio")

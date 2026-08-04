@@ -34,6 +34,9 @@ public class UnrealMCPBridge : ModuleRules
             "EditorScriptingUtilities",
             "AssetRegistry",
             "AssetTools",
+            // Content Browser asset selection, so asset.export_fbx can act on what the user
+            // has highlighted rather than requiring explicit object paths
+            "ContentBrowser",
             "Kismet",
             "KismetCompiler",
             "BlueprintGraph",

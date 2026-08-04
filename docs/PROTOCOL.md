@@ -213,6 +213,97 @@ event graph has neither, and an empty array there would read as "takes nothing, 
 
 ---
 
+### FBX exchange — `level.*` / `asset.*_fbx`
+
+Round-trips geometry with an external DCC (Maya, via [maya-mcp](https://github.com/YomenStyle/maya-mcp)).
+Both programs are assumed to be on the same machine: these methods pass **shared folder paths**,
+never binary payloads over the protocol.
+
+| Method                  | Params                                                                                 | Result fields                                                                     | Description                                        |
+|-------------------------|----------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|----------------------------------------------------|
+| `level.export_selected` | `path: string, selected_only?: bool` (def. true)`, include_collision?: bool` (def. false)`, ascii?: bool` (def. false) | `path, exists: bool, size_bytes: int, actor_count: int, actors: [string], skipped: [string], actors_truncated: bool` | Exports selected level actors to one FBX           |
+| `asset.export_fbx`      | `path: string, object_path?: string, object_paths?: [string], ascii?: bool, include_collision?: bool, include_lods?: bool, include_morph_targets?: bool` (def. true) | `exported: [{object_path, path, class, size_bytes}], count: int, skipped: [{object_path, reason}], from_content_browser_selection: bool` | Exports individual mesh assets, one FBX each       |
+| `asset.import_fbx`      | `path: string, destination_path: string, replace_existing?: bool` (def. true)`, import_as_skeletal?: bool, skeleton_path?: string, combine_meshes?: bool, generate_lightmap_uvs?: bool` (def. true)`, auto_generate_collision?: bool, save?: bool` (def. true)`, use_interchange?: bool` | `imported: [string], count: int, saved: bool`                                     | Imports an FBX into the content browser            |
+| `level.spawn_asset`     | `object_path: string, location?: [x,y,z], rotation?: [pitch,yaw,roll], scale?: [x,y,z], label?: string` | `actor_name: string, class: string, actor_path: string`                           | Places an imported asset in the current level      |
+
+**Which exporter to use.** `level.export_selected` writes every mesh component of every
+selected actor into a single file — selecting a Blueprint character drags all of its skeletal
+meshes along. `asset.export_fbx` is the per-asset counterpart: it takes assets rather than
+actors and emits one file each, so a single body or head mesh comes out on its own.
+
+`asset.export_fbx` resolves what to export in this order: `object_path`, then `object_paths`,
+then the current Content Browser selection. `path` ending in `.fbx` names one output file and
+requires exactly one asset to resolve; anything else is treated as a directory receiving one
+`<AssetName>.fbx` per asset. Assets that are neither StaticMesh nor SkeletalMesh land in
+`skipped` with a reason instead of failing the whole call.
+
+**level.export_selected example**
+```json
+// request
+{ "method": "level.export_selected", "params": { "path": "D:/exchange/props.fbx", "selected_only": true } }
+// result
+{
+  "path": "D:/exchange/props.fbx", "exists": true, "size_bytes": 128400,
+  "actor_count": 2, "actors": ["SM_Wall_01", "SM_Wall_02"],
+  "skipped": [], "actors_truncated": false
+}
+```
+
+`actors` is capped at 200 names; `actor_count` is always the true total and
+`actors_truncated` says whether the list was cut. `skipped` lists selected actors carrying no
+mesh or brush geometry — Blueprint actors *with* mesh components do export normally.
+
+**asset.export_fbx example**
+```json
+// request — whatever is selected in the Content Browser, one file each
+{ "method": "asset.export_fbx", "params": { "path": "D:/exchange/rita" } }
+// result
+{
+  "exported": [
+    { "object_path": "/Game/Char/SK_Rita_Body.SK_Rita_Body", "path": "D:/exchange/rita/SK_Rita_Body.fbx",
+      "class": "SkeletalMesh", "size_bytes": 2794528 }
+  ],
+  "count": 1, "skipped": [], "from_content_browser_selection": true
+}
+```
+
+**asset.import_fbx example**
+```json
+// request
+{ "method": "asset.import_fbx", "params": {
+    "path": "D:/exchange/SM_Prop.fbx", "destination_path": "/Game/Props",
+    "auto_generate_collision": false } }
+// result
+{ "imported": ["/Game/Props/SM_Prop.SM_Prop"], "count": 1, "saved": true }
+```
+
+Keep `auto_generate_collision` false when the FBX already carries `UBX_`/`UCX_` collision
+authored in the DCC, or Unreal adds its own on top and you end up with both. Materials and
+textures are never imported — an Unreal material and a Maya shader are different objects, so
+only geometry, names and slot layout cross over.
+
+The engine routes FBX through Interchange by default, which ignores the legacy import flags
+above. These methods therefore pin the legacy `UFbxFactory` so the documented options take
+effect; pass `use_interchange: true` to fall back to the engine's default routing.
+
+**level.spawn_asset example**
+```json
+// request
+{ "method": "level.spawn_asset", "params": {
+    "object_path": "/Game/Props/SM_Prop.SM_Prop", "location": [0, 0, 0], "label": "SM_Prop_01" } }
+// result
+{ "actor_name": "SM_Prop_01", "class": "StaticMeshActor", "actor_path": "/Game/Maps/Main.Main:PersistentLevel.StaticMeshActor_0" }
+```
+
+**Axis and units.** Unreal is Z-up, Maya is Y-up; both default to centimetres, so
+`scale_factor` 1.0 is correct. Unreal's FBX exporter normally writes Y-up, matching maya-mcp's
+`up_axis="y"` default — if an import lands on its side, retry with `up_axis="z"`.
+
+`InvalidParams` covers a missing file, an empty selection, and a `.fbx` `path` given with
+multiple assets; `InternalError` covers an export or import that ran but produced nothing.
+
+---
+
 ### compile.*
 
 | Method                          | Params | Result fields                          | Description                                           |

@@ -344,7 +344,13 @@ MCPProtocol::FMCPResponse FMCPServerRunnable::DispatchToGameThread(const MCPProt
         }
         else
         {
-            Promise.SetValue(MCPProtocol::MakeError(Id, DispatchError.Code, DispatchError.Message));
+            // Forward the handler's optional diagnostic payload too. MakeError only takes
+            // code and message, so rebuilding through it would drop Data on the floor —
+            // PROTOCOL.md documents "data" on error responses, and handlers rely on it to
+            // explain partial failures (which assets were skipped, and why).
+            MCPProtocol::FMCPResponse ErrorResponse = MCPProtocol::MakeError(Id, DispatchError.Code, DispatchError.Message);
+            ErrorResponse.Error->Data = DispatchError.Data;
+            Promise.SetValue(MoveTemp(ErrorResponse));
         }
     });
 

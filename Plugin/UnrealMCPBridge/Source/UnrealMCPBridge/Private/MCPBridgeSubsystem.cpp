@@ -15,6 +15,7 @@
 #include "Commands/CameraVariableCommands.h"
 #include "Commands/MaterialCommands.h"
 #include "Commands/NiagaraCommands.h"
+#include "Commands/LevelIOCommands.h"
 
 void UMCPBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -57,6 +58,7 @@ void UMCPBridgeSubsystem::StartListener()
         Handlers.Add(MakeShared<FCameraVariableCommandHandler>());
         Handlers.Add(MakeShared<FMaterialCommandHandler>());
         Handlers.Add(MakeShared<FNiagaraCommandHandler>());
+        Handlers.Add(MakeShared<FLevelIOCommandHandler>());
 
         for (const TSharedPtr<IMCPCommandHandler>& Handler : Handlers)
         {
