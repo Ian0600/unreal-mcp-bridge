@@ -242,6 +242,54 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             return Result;
         });
 
+    // statetree.remove_transition — removes one transition from a state. Params: tree_path,
+    // from_state_id, transition_id (both from statetree.list_states). Returns { removed }.
+    //
+    // Identified by transition id rather than index: list_states reports ids, and an index would go
+    // stale the moment anything else on that state is edited — removing the wrong transition is silent
+    // and only shows up as the AI taking a path it should not.
+    Registry.Register(TEXT("statetree.remove_transition"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            UStateTree* Tree = LoadTree(Params, OutError); if (!Tree) return nullptr;
+            UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
+
+            FString FromId, TransitionId;
+            if (!RequireString(Params, TEXT("from_state_id"), FromId, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("transition_id"), TransitionId, OutError)) return nullptr;
+
+            FGuid FromGuid, TransGuid;
+            FGuid::Parse(FromId, FromGuid);
+            FGuid::Parse(TransitionId, TransGuid);
+
+            UStateTreeState* From = FindStateById(Ed, FromGuid);
+            if (!From)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = TEXT("from_state not found");
+                return nullptr;
+            }
+
+            const int32 Index = From->Transitions.IndexOfByPredicate(
+                [&TransGuid](const FStateTreeTransition& T) { return T.ID == TransGuid; });
+            if (Index == INDEX_NONE)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = FString::Printf(TEXT("transition %s not found on state %s"),
+                    *TransitionId, *From->Name.ToString());
+                return nullptr;
+            }
+
+            From->Modify();
+            From->Transitions.RemoveAt(Index);
+            Tree->MarkPackageDirty();
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetBoolField(TEXT("removed"), true);
+            Result->SetNumberField(TEXT("remaining"), From->Transitions.Num());
+            return Result;
+        });
+
     // statetree.add_binding — binds an output of source node to an input of target node.
     // Params: tree_path, source_node_id, source_path, target_node_id, target_path.
     Registry.Register(TEXT("statetree.add_binding"),

@@ -32,6 +32,8 @@ public class UnrealMCPBridge : ModuleRules
             "UnrealEd",
             "EditorSubsystem",
             "EditorScriptingUtilities",
+            // UEditorUtilityLibrary::GetSelectedAssetData for asset.get_selection
+            "Blutility",
             "AssetRegistry",
             "AssetTools",
             // UEditorUtilityLibrary::GetSelectedAssetData for asset.get_selection
@@ -62,6 +64,15 @@ public class UnrealMCPBridge : ModuleRules
             // unexported FNiagaraStackGraphUtilities free functions.
             "Niagara",
             "NiagaraEditor",
+            // Widget Blueprint (UMG) authoring. UMGEditor exports FWidgetBlueprintOperationUtils,
+            // which UE 5.6 added for exactly this: headless widget tree manipulation that takes a
+            // UWidgetBlueprint* instead of a live editor toolkit.
+            "UMG",
+            "UMGEditor",
+            // Widget animations are UMovieSceneSequences; tracks, sections and keyframe channels
+            // all come from these two.
+            "MovieScene",
+            "MovieSceneTracks",
         });
     }
 }

@@ -48,6 +48,26 @@ UEdGraph* UMCPGraphEditLibrary::FindGraphByName(UBlueprint* BP, const FString& G
 {
     if (!BP) return nullptr;
 
+    // A full object path wins over the name search. Nested graph names are not unique — an
+    // AnimBlueprint can hold several `AnimationBlendStackGraph_0`, one per Blend Stack / Motion
+    // Matching node — so a caller that needs a specific one has no way to say which by name alone.
+    // Paths are checked to actually live under BP: resolving to another asset's graph and editing it
+    // would be a silent cross-asset write.
+    if (GraphName.Contains(TEXT(":")) || GraphName.Contains(TEXT("/")))
+    {
+        if (UEdGraph* ByPath = FindObject<UEdGraph>(nullptr, *GraphName))
+        {
+            for (UObject* Outer = ByPath->GetOuter(); Outer; Outer = Outer->GetOuter())
+            {
+                if (Outer == BP) return ByPath;
+            }
+            UE_LOG(LogMCPBridge, Warning,
+                TEXT("FindGraphByName: '%s' resolved but is not owned by blueprint '%s'"),
+                *GraphName, *BP->GetName());
+            return nullptr;
+        }
+    }
+
     auto Search = [&](const TArray<UEdGraph*>& Graphs) -> UEdGraph*
     {
         for (UEdGraph* G : Graphs)
@@ -108,6 +128,50 @@ UEdGraph* UMCPGraphEditLibrary::FindGraphByName(UBlueprint* BP, const FString& G
     for (UEdGraph* TopGraph : BP->FunctionGraphs)
     {
         if (UEdGraph* Found = SearchStateMachineNested(TopGraph)) return Found;
+    }
+
+    // Still nothing — walk every graph a node says it owns. This is what reaches the Blend Stack
+    // graph inside a Motion Matching / Blend Stack node (`AnimationBlendStackGraph_*`, where GASP
+    // keeps Orientation Warping and Steering), and it picks up any future node type that nests a
+    // graph without needing a new special case here.
+    //
+    // The explicit state machine walk above stays: it is the path that is exercised today, and this
+    // one only runs when that came up empty.
+    {
+        TArray<UEdGraph*> Queue;
+        TSet<const UEdGraph*> Visited;
+
+        auto Enqueue = [&Queue, &Visited](UEdGraph* G)
+        {
+            // Visited is what stops a node that reports its own graph (or a sibling that reports
+            // back) from queueing forever.
+            if (G && !Visited.Contains(G))
+            {
+                Visited.Add(G);
+                Queue.Add(G);
+            }
+        };
+
+        for (UEdGraph* G : BP->UbergraphPages) { Enqueue(G); }
+        for (UEdGraph* G : BP->FunctionGraphs) { Enqueue(G); }
+        for (UEdGraph* G : BP->MacroGraphs)    { Enqueue(G); }
+        for (const FBPInterfaceDescription& Iface : BP->ImplementedInterfaces)
+        {
+            for (const TObjectPtr<UEdGraph>& G : Iface.Graphs) { Enqueue(G); }
+        }
+
+        // Index-based loop: Enqueue appends while we iterate, which is the breadth-first descent.
+        for (int32 Index = 0; Index < Queue.Num(); ++Index)
+        {
+            UEdGraph* Graph = Queue[Index];
+            if (Graph->GetName() == GraphName) return Graph;
+
+            for (UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (!Node) continue;
+                for (UEdGraph* Sub : Node->GetSubGraphs()) { Enqueue(Sub); }
+            }
+        }
     }
 
     return nullptr;
@@ -591,6 +655,106 @@ bool UMCPGraphEditLibrary::SetBlendSpaceAxisRange(
     BlendSpace->PostEditChange();
     BlendSpace->MarkPackageDirty();
     return true;
+}
+
+namespace
+{
+    // Shared reflection walk for the two Pose Search Database entry helpers. Everything is looked up
+    // by name so this compiles without the PoseSearch module: the array is private and the element
+    // struct's fields are editor-only, which is exactly what FProperty access is for.
+    // Visit(EntryPtr, AnimAssetProp, EnabledProp) is called once per entry; either FProperty may be
+    // null if the struct layout ever changes, so callers must check.
+    bool ForEachPoseSearchDatabaseEntry(
+        UObject* Database,
+        const TFunctionRef<void(void*, FObjectPropertyBase*, FBoolProperty*)>& Visit)
+    {
+        if (!Database) return false;
+
+        FArrayProperty* ArrayProp =
+            FindFProperty<FArrayProperty>(Database->GetClass(), TEXT("DatabaseAnimationAssets"));
+        if (!ArrayProp) return false;
+
+        FStructProperty* ElemProp = CastField<FStructProperty>(ArrayProp->Inner);
+        if (!ElemProp || !ElemProp->Struct) return false;
+
+        // AnimAsset is TObjectPtr<UObject>, so the property is FObjectProperty — take the base class
+        // to stay tolerant of it being declared as a soft/typed object property instead.
+        FObjectPropertyBase* AssetProp =
+            FindFProperty<FObjectPropertyBase>(ElemProp->Struct, TEXT("AnimAsset"));
+        FBoolProperty* EnabledProp = FindFProperty<FBoolProperty>(ElemProp->Struct, TEXT("bEnabled"));
+
+        FScriptArrayHelper Helper(ArrayProp, ArrayProp->ContainerPtrToValuePtr<void>(Database));
+        for (int32 i = 0; i < Helper.Num(); ++i)
+        {
+            Visit(Helper.GetRawPtr(i), AssetProp, EnabledProp);
+        }
+        return true;
+    }
+}
+
+int32 UMCPGraphEditLibrary::SetPoseSearchDatabaseEntriesEnabled(
+    UObject* Database,
+    const TArray<FString>& NameSubstrings,
+    bool bEnabled)
+{
+    if (!Database)
+    {
+        UE_LOG(LogMCPBridge, Warning, TEXT("SetPoseSearchDatabaseEntriesEnabled: null database"));
+        return -1;
+    }
+
+    int32 Changed = 0;
+    const bool bWalked = ForEachPoseSearchDatabaseEntry(Database,
+        [&](void* Entry, FObjectPropertyBase* AssetProp, FBoolProperty* EnabledProp)
+        {
+            if (!AssetProp || !EnabledProp) return;
+
+            const UObject* Asset = AssetProp->GetObjectPropertyValue_InContainer(Entry);
+            if (!Asset) return;
+
+            const FString AssetName = Asset->GetName();
+            const bool bMatches = NameSubstrings.ContainsByPredicate(
+                [&AssetName](const FString& Needle) { return AssetName.Contains(Needle); });
+            if (!bMatches) return;
+
+            // Only count entries this actually changes, so a caller can tell "matched nothing" from
+            // "matched, already in that state".
+            if (EnabledProp->GetPropertyValue_InContainer(Entry) == bEnabled) return;
+
+            Database->Modify();
+            EnabledProp->SetPropertyValue_InContainer(Entry, bEnabled);
+            ++Changed;
+        });
+
+    if (!bWalked)
+    {
+        UE_LOG(LogMCPBridge, Warning,
+            TEXT("SetPoseSearchDatabaseEntriesEnabled: '%s' has no reachable DatabaseAnimationAssets"),
+            *Database->GetName());
+        return -1;
+    }
+
+    if (Changed > 0)
+    {
+        // The database caches a built search index; without a PostEditChange it keeps serving the old
+        // one and the disabled clips stay selectable until something else re-cooks the asset.
+        Database->PostEditChange();
+        Database->MarkPackageDirty();
+    }
+    return Changed;
+}
+
+TArray<FString> UMCPGraphEditLibrary::ListPoseSearchDatabaseEntries(UObject* Database)
+{
+    TArray<FString> Out;
+    ForEachPoseSearchDatabaseEntry(Database,
+        [&](void* Entry, FObjectPropertyBase* AssetProp, FBoolProperty* EnabledProp)
+        {
+            const UObject* Asset = AssetProp ? AssetProp->GetObjectPropertyValue_InContainer(Entry) : nullptr;
+            const bool bOn = EnabledProp ? EnabledProp->GetPropertyValue_InContainer(Entry) : true;
+            Out.Add(FString::Printf(TEXT("%d %s"), bOn ? 1 : 0, Asset ? *Asset->GetName() : TEXT("<none>")));
+        });
+    return Out;
 }
 
 bool UMCPGraphEditLibrary::CompileBlueprint(UBlueprint* Blueprint)

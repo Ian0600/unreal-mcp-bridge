@@ -28,6 +28,14 @@ public:
     UPROPERTY(EditAnywhere, config, Category="MCP")
     int32 Port = 0;
 
+    // 추가 리스너 포트. 리스너 하나는 클라이언트 하나만 받는다 — FMCPServerRunnable::Run의
+    // per-client 루프가 블로킹이라 그 클라이언트가 끊기기 전에는 accept로 돌아오지 못하고,
+    // 뒤에 붙으려는 쪽은 connection refused를 맞는다. 그래서 MCP 클라이언트를 동시에
+    // 여러 개 붙이려면 포트를 나눠야 한다(예: Claude Code는 Port=30100, Codex는 여기 30101).
+    // Port와 중복되는 값과 0 이하는 무시된다.
+    UPROPERTY(EditAnywhere, config, Category="MCP")
+    TArray<int32> AdditionalPorts;
+
     // GameThread 디스패치를 기다리는 시간(초). 초과하면 InternalError를 반환한다.
     UPROPERTY(EditAnywhere, config, Category="MCP")
     int32 GameThreadDispatchTimeoutSeconds = 30;
@@ -40,7 +48,7 @@ public:
 
 #if WITH_EDITOR
     // 설정이 바뀔 때마다 브리지 리스너를 재시작한다. 덕분에 Project Settings에서
-    // bEnabled / Port를 바꾸면 에디터를 다시 켜지 않아도 즉시 반영된다.
+    // bEnabled / Port / AdditionalPorts를 바꾸면 에디터를 다시 켜지 않아도 즉시 반영된다.
     virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 };

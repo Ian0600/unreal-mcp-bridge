@@ -23,17 +23,21 @@ public:
     void RestartFromSettings();
 
 private:
-    // Start the TCP listener if settings allow it (bEnabled && Port > 0).
+    // Start the TCP listeners if settings allow it (bEnabled && Port > 0).
+    // Opens one listener per port: Port plus every valid entry in AdditionalPorts.
     // Idempotent: does nothing if already running or disabled.
     void StartListener();
 
-    // Stop the TCP listener if running. Safe to call multiple times.
+    // Stop every running listener. Safe to call multiple times.
     void StopListener();
 
-    // Gracefully stop the server; safe to call multiple times (idempotent).
+    // Gracefully stop the servers; safe to call multiple times (idempotent).
     void HandleEditorExit();
 
-    TUniquePtr<FMCPServerRunnable> Server;
+    // 포트마다 리스너 하나. 리스너 한 개가 클라이언트 한 개만 받으므로
+    // (FMCPServerRunnable::Run의 per-client 루프가 블로킹) 동시 접속 클라이언트
+    // 수만큼 포트가 필요하고, 그래서 단일 포인터가 아니라 배열이다.
+    TArray<TUniquePtr<FMCPServerRunnable>> Servers;
     TSharedPtr<FMCPCommandRegistry> Registry;
     FDelegateHandle OnExitHandle;
 

@@ -291,6 +291,32 @@ public:
         float Min,
         float Max);
 
+    // Enables/disables individual animation entries of a Pose Search Database (motion matching),
+    // matching entries whose animation asset name contains any of NameSubstrings. Returns the number
+    // of entries changed, or -1 if the database's entry array could not be reached.
+    //
+    // Why this is not reachable from plain Python: UPoseSearchDatabase::DatabaseAnimationAssets is a
+    // *private* plain UPROPERTY() — no EditAnywhere, no BlueprintReadWrite — so get/set_editor_property
+    // refuses it, and the per-entry bEnabled flag is editor-only data on the element struct. This walks
+    // the array through FProperty reflection, which ignores C++ access specifiers, and looks the two
+    // fields up by name ("AnimAsset", "bEnabled") so no PoseSearch module dependency is needed.
+    //
+    // Disabling an entry is how you take a clip out of the search pool without deleting it — the use
+    // case being a clip whose authored speed does not exist in your movement model, which motion
+    // matching will otherwise keep selecting (GASP's Transition_Run_to_Sprint sits at 500cm/s for its
+    // first 0.8s, so a character whose sprint is 510 matches its head far better than the 700cm/s loop).
+    UFUNCTION(BlueprintCallable, Category = "MCP|Asset", meta = (DevelopmentOnly))
+    static int32 SetPoseSearchDatabaseEntriesEnabled(
+        UObject* Database,
+        const TArray<FString>& NameSubstrings,
+        bool bEnabled);
+
+    // Lists a Pose Search Database's animation entries as "<enabled 0/1> <asset name>", in array
+    // order. Same reflection path as SetPoseSearchDatabaseEntriesEnabled — use it to check what a
+    // toggle actually did, since the entries are invisible to Python otherwise.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Asset", meta = (DevelopmentOnly))
+    static TArray<FString> ListPoseSearchDatabaseEntries(UObject* Database);
+
     // Exposes a camera node property on a UCameraRigAsset as a blendable interface parameter —
     // the scriptable equivalent of "expose" on a property in the camera rig editor.
     //
@@ -319,10 +345,16 @@ public:
     UFUNCTION(BlueprintCallable, Category = "MCP|Camera", meta = (DevelopmentOnly))
     static TArray<FString> ListCameraRigParameters(class UCameraRigAsset* Rig);
 
+    // GraphName may also be a full object path (contains '/' or ':'), which is the only way to name
+    // one specific nested graph — Blend Stack graph names repeat across nodes.
+    //
     // Resolves GraphName against Blueprint's top-level graphs, then (for AnimBlueprints) falls
     // back to nested AnimGraph graphs: state machine inner graphs, state bound graphs, and
-    // transition rule graphs. Public so other command handlers (e.g. blueprint.get_graph_nodes)
-    // can inspect nested anim graphs too. Not a UFUNCTION — C++-only, no Python/Blueprint exposure.
+    // transition rule graphs. Failing that it walks UEdGraphNode::GetSubGraphs() breadth-first,
+    // which is what reaches a Blend Stack graph inside a Motion Matching node
+    // (`AnimationBlendStackGraph_*`). Public so other command handlers (e.g.
+    // blueprint.get_graph_nodes) can inspect nested anim graphs too. Not a UFUNCTION — C++-only,
+    // no Python/Blueprint exposure.
     static UEdGraph* FindGraphByName(UBlueprint* BP, const FString& GraphName);
 
 private:
