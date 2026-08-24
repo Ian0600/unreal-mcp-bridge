@@ -5,7 +5,8 @@
 - **Protocol**: JSON-RPC 2.0 over TCP
 - **Framing**: Single newline character (`\n`) as message delimiter
 - **Encoding**: UTF-8
-- **Line size limit**: 64 KB (65536 bytes). Requests exceeding this limit receive an `InvalidRequest` error and the connection is closed.
+- **Line size limit**: 16 MiB (16777216 bytes) by default, settable per side (`MaxLineBytes` in the plugin, `UMCP_MAX_LINE_BYTES` in the Python server). Requests exceeding the plugin's limit receive an `InvalidRequest` error and the connection is closed.
+- **One client per listener**: a listener accepts a single connection and stays in a blocking per-client loop until it drops, so a second client on the same port is refused. To attach several MCP clients at once, give each its own port via `AdditionalPorts` — one listener thread is started per port, all sharing one command registry, which is safe because every handler is serialised onto the GameThread anyway.
 
 ## Message Formats
 
@@ -72,9 +73,10 @@ Example usage: `-32000` for "Editor not ready", `-32001` for "Asset not found".
 ## Method Catalogue
 
 The tables below cover the core domains in detail. The bridge also serves `animgraph.*`,
-`animnotify.*`, `statetree.*`, `camerarig.*`, `camvar.*`, `material.*` and `niagara.*`, which are
+`animnotify.*`, `montage.*`, `statetree.*`, `camerarig.*`, `camvar.*`, `material.*` and `niagara.*`, which are
 documented by the docstrings on their `@mcp.tool()` wrappers in
-`Python/unreal_mcp_bridge/tools/`. The authoritative list of methods is the set of
+`Python/unreal_mcp_bridge/tools/`. Every registered method has exactly one such wrapper, so the
+tool list an MCP client sees and this catalogue are the same set. The authoritative list of methods is the set of
 `Registry.Register(TEXT("..."))` calls under
 `Plugin/UnrealMCPBridge/Source/UnrealMCPBridge/Private/Commands/`.
 
@@ -182,6 +184,8 @@ event graph has neither, and an empty array there would read as "takes nothing, 
 | `asset.list`            | `package_path: string, recursive?: bool` (def. false) | `assets: [{name, class, object_path}]`          | Lists assets under a content package path          |
 | `asset.get_metadata`    | `object_path: string`                               | `class: string, tags: {key: value}`               | Returns AssetRegistry metadata for an asset        |
 | `asset.save`            | `object_path: string`                               | `saved: bool`                                     | Saves an asset package to disk                     |
+| `asset.get_selection`   | —                                                   | `count: int, assets: [{name, class, object_path}]` | Returns the Content Browser selection             |
+| `asset.set_selection`   | `object_paths: [string], focus?: bool` (def. true)  | `selected: int, not_found: [string]`              | Selects assets in the Content Browser              |
 
 **asset.list example**
 ```json
@@ -301,6 +305,101 @@ effect; pass `use_interchange: true` to fall back to the engine's default routin
 
 `InvalidParams` covers a missing file, an empty selection, and a `.fbx` `path` given with
 multiple assets; `InternalError` covers an export or import that ran but produced nothing.
+
+---
+
+### skeletalmesh.*
+
+Attachment sockets. Re-exporting a character mesh wipes them, so this is the domain that puts a
+rig back together after an art drop rather than a one-off convenience.
+
+| Method                        | Params                                                                                                                                              | Result fields                                | Description                                    |
+|-------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|------------------------------------------------|
+| `skeletalmesh.list_sockets`   | `mesh_path: string`                                                                                                                                 | `mesh_sockets: [socket], skeleton_sockets: [socket]` | Lists a mesh's own sockets and its skeleton's |
+| `skeletalmesh.add_socket`     | `mesh_path, socket_name, bone_name: string, location?: [x,y,z], rotation?: [pitch,yaw,roll], scale?: [x,y,z], to_skeleton?: bool, replace?: bool, preview_mesh?: string` | `ok: bool, replaced: bool, owner: string, socket: socket` | Creates or overwrites a socket     |
+| `skeletalmesh.remove_socket`  | `mesh_path, socket_name: string`                                                                                                                     | `ok: bool, removed_from: "mesh" or "skeleton"` | Removes a socket from whichever list holds it |
+
+A `socket` is `{name, bone, location: [x,y,z], rotation: [pitch,yaw,roll], scale: [x,y,z]}`.
+Rotation is in details-panel order (pitch, yaw, roll), not `FRotator`'s constructor order.
+
+**The two socket lists are not interchangeable.** A skeleton socket is shared by every mesh built
+on that skeleton; a mesh socket is not. At runtime the mesh is consulted first, so a mesh socket
+silently shadows a skeleton socket of the same name. `to_skeleton` picks which list to write to —
+the skeleton for a character whose body mesh is swapped, the mesh (the default) otherwise.
+
+`add_socket` verifies the bone exists, because nothing downstream does: attaching to a missing bone
+is not a runtime error, the component just sits at the mesh origin.
+
+`preview_mesh` is the editor-only asset shown at the socket. It is stored on the skeleton's
+`PreviewAttachedAssetContainer`, not on the socket, which is why it survives deleting and
+recreating a socket of the same name — and why it is unreachable from Python.
+
+---
+
+### widget.*
+
+Widget Blueprint authoring: the asset, its widget tree, property bindings, UI components, and
+UMG animations. 52 methods; each has a full parameter docstring on its `@mcp.tool()` wrapper in
+`Python/unreal_mcp_bridge/tools/widget.py` and `widgetanim.py`.
+
+Everything here routes through the editor's own UMG utilities (`FWidgetBlueprintEditorUtils` and
+friends). `UWidgetTree` is reachable from Python, but that route skips the name-collision
+handling, the reference retargeting, and the blueprint-structure notifications the editor performs
+around every edit — so a tree built that way reads back correctly and then compiles into something
+else.
+
+**Asset level** — `widget.create`, `get_info`, `set_property`, `list_blueprint_properties`,
+`set_desired_focus`, `compile`, `validate`, `palette_list`.
+
+**Widget tree** — `widget.tree_list`, `get_widget`, `add`, `remove`, `rename`, `move`, `replace`,
+`replace_with_child`, `replace_with_named_slot`, `wrap`, `set_is_variable`, `set_root`,
+`duplicate`.
+
+**Properties** — `widget.list_properties`, `set_widget_property`, `list_slot_properties`,
+`set_slot_property`. Values cross the wire in the editor's own text form (`"(X=10,Y=20)"` for a
+struct, an enumerator name for an enum), so a listed value is accepted back verbatim.
+
+**Named slots** — `widget.named_slot_list`, `named_slot_set_content`, `named_slot_clear`. Only
+three things host named slots: a nested `UUserWidget`, an `ExpandableArea`, and the widget tree
+itself. A `NamedSlot` widget is not one of them — it *declares* a slot for consumers of the
+blueprint, and locally its content is an ordinary child, so tree methods apply to it instead.
+
+**Bindings and events** — `widget.binding_list`, `binding_add`, `binding_remove`, `list_events`,
+`bind_event`.
+
+**UI components** — `widget.component_add`, `component_remove`, `component_move`.
+
+**Clipboard text** — `widget.export_text`, `import_text`. The same format the designer's
+copy/paste produces, which is how a laid-out subtree moves between assets.
+
+**Animation** — `widget.anim_list`, `anim_create`, `anim_remove`, `anim_rename`, `anim_set_range`,
+`anim_binding_list`, `anim_bind_widget`, `anim_unbind_widget`, `anim_track_list`, `anim_track_add`,
+`anim_track_remove`, `anim_section_add`, `anim_key_add`, `anim_key_list`.
+
+Four things are worth knowing before scripting against this domain.
+
+*A widget must be a variable before the graph or an animation can touch it.* `widget.set_is_variable`
+is usually the call right after `widget.add` for anything the game references.
+
+*Slot properties are not widget properties.* Anchors, offsets, size rules and padding live on the
+slot object owned by the parent panel, so they are listed and written through the `*_slot_property`
+methods. A `widget.move` rebuilds the slot for the new parent's slot class, which discards them.
+
+*A widget animation is a `UMovieScene`, and its pieces stack in one order:*
+
+```
+widget.anim_create -> widget.anim_bind_widget -> widget.anim_track_add -> widget.anim_key_add
+```
+
+*A possessable GUID means nothing to UMG on its own.* The parallel `FWidgetAnimationBinding` array
+is what maps it back to a widget name at runtime, so both halves have to be written together —
+`anim_bind_widget` and `anim_unbind_widget` do; a hand-built movie scene edit typically does not,
+and the animation then plays over nothing.
+
+Animation times cross the wire in seconds, matching the animation panel; frame numbers come back
+alongside them. `bind_slot` on `anim_bind_widget` possesses the widget's slot instead of the widget,
+which is how layout is animated — sliding a panel on-screen is a slot binding, fading it is a
+widget binding.
 
 ---
 

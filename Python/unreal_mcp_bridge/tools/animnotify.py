@@ -23,6 +23,50 @@ def register_animnotify_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         return conn.call("animnotify.list", params)
 
     @mcp.tool()
+    def animnotify_add(
+        animation_path: str,
+        notify_class: str,
+        start_time: float,
+        duration: float | None = None,
+        track: int = 0,
+        properties: dict | None = None,
+    ) -> dict:
+        """Places a NEW notify (or notify state) on an animation asset.
+
+        Python cannot do this at all: UAnimSequenceBase::Notifies is script-protected, so a montage's
+        hit window is unreachable from editor_python_exec.
+
+        notify_class takes a full object path ("/Script/IFSR.AnimNotifyState_MonsterMeleeHit") or a bare
+        class name. Path form is preferred — a bare-name lookup is a global scan that can hit a
+        same-named class in another module.
+
+        duration is required for notify states and rejected for plain notifies.
+
+        properties optionally configures the new notify, as {name: "ImportText value"} — the same text
+        form the editor writes, so gameplay tags go in as '(TagName="Anim.Reaction.Hit.L")', enums as
+        their enumerator name, and so on. Set the sub-object config here rather than after the fact:
+        re-creating a notify to change it rebuilds its Instanced sub-objects from class defaults.
+
+        Returns {"ok", "index", "class", "start_time", "duration", "track"}. The index is the position
+        AFTER the notify list is re-sorted by time — pass that one to animnotify_set_window, not the
+        order you added things in."""
+        if not animation_path:
+            raise ValueError("animation_path is required")
+        if not notify_class:
+            raise ValueError("notify_class is required")
+        params: dict = {
+            "animation_path": animation_path,
+            "notify_class": notify_class,
+            "start_time": start_time,
+            "track": track,
+        }
+        if duration is not None:
+            params["duration"] = duration
+        if properties:
+            params["properties"] = properties
+        return conn.call("animnotify.add", params)
+
+    @mcp.tool()
     def animnotify_set_window(
         animation_path: str,
         index: int,
@@ -47,3 +91,39 @@ def register_animnotify_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         if duration is not None:
             params["duration"] = duration
         return conn.call("animnotify.set_window", params)
+
+    @mcp.tool()
+    def animnotify_set_properties(animation_path: str, index: int, properties: dict) -> dict:
+        """Reconfigures a notify that is already placed. index comes from animnotify_list, properties
+        is {name: "ImportText value"} — the same text form animnotify_add takes.
+
+        Use this rather than remove-and-re-add: a notify's Instanced sub-objects are rebuilt from
+        class defaults on creation, so re-adding one silently discards the rest of the animator's
+        configuration on it.
+
+        Returns {"ok", "class", "applied": [names]}."""
+        if not animation_path:
+            raise ValueError("animation_path is required")
+        if not properties:
+            raise ValueError("properties (non-empty) is required")
+        return conn.call("animnotify.set_properties", {
+            "animation_path": animation_path,
+            "index": index,
+            "properties": properties,
+        })
+
+    @mcp.tool()
+    def animnotify_remove(animation_path: str, index: int) -> dict:
+        """Removes a notify event. index comes from animnotify_list.
+
+        Indices shift. They are positions in a list that gets re-sorted by time, so removing one
+        invalidates every index read before it — re-list between removals rather than walking a
+        saved list backwards, because the order you saved is not guaranteed to be the sorted one.
+
+        Returns {"ok", "removed": {"class", "start_time", "duration"}, "remaining"}."""
+        if not animation_path:
+            raise ValueError("animation_path is required")
+        return conn.call("animnotify.remove", {
+            "animation_path": animation_path,
+            "index": index,
+        })

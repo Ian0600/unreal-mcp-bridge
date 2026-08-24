@@ -122,6 +122,31 @@ def register_statetree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         })
 
     @mcp.tool()
+    def statetree_remove_transition(
+        tree_path: str,
+        from_state_id: str,
+        transition_id: str,
+    ) -> dict:
+        """Removes one transition from a state. Both ids come from statetree_list_states.
+
+        Identified by transition id rather than list index: an index goes stale the moment
+        anything else on that state is edited, and removing the wrong transition is silent —
+        it only shows up later as the AI taking a path it should not.
+
+        Returns {"removed": true, "remaining": <count still on that state>}."""
+        if not tree_path:
+            raise ValueError("tree_path is required")
+        if not from_state_id:
+            raise ValueError("from_state_id is required")
+        if not transition_id:
+            raise ValueError("transition_id is required")
+        return conn.call("statetree.remove_transition", {
+            "tree_path": tree_path,
+            "from_state_id": from_state_id,
+            "transition_id": transition_id,
+        })
+
+    @mcp.tool()
     def statetree_add_binding(
         tree_path: str,
         source_node_id: str,

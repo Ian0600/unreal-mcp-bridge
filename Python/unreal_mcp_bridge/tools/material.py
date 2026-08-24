@@ -714,3 +714,52 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         if color:
             params["color"] = color
         return conn.call("material.add_group_comment", params)
+
+    # ---------------------------------------------------------------- attribute pins
+
+    @mcp.tool()
+    def material_attribute_pin_list(
+        material_path: str = "",
+        function_path: str = "",
+        expression_guid: str = "",
+    ) -> dict:
+        """Reports the attribute pins on a Get/Set Material Attributes node.
+
+        Returns {"kind", "pins": [{"index", "attribute", "attribute_id"}], "attribute_count",
+        "pin_count", "consistent"}.
+
+        Check consistent. It is the invariant the engine asserts on while loading the package, so
+        false means the node is already broken and will crash the editor the next time this asset is
+        opened."""
+        if not expression_guid:
+            raise ValueError("expression_guid is required")
+        params = _graph_host(material_path, function_path)
+        params["expression_guid"] = expression_guid
+        return conn.call("material.attribute_pin_list", params)
+
+    @mcp.tool()
+    def material_attribute_pin_add(
+        attribute: str,
+        expression_guid: str,
+        material_path: str = "",
+        function_path: str = "",
+    ) -> dict:
+        """Adds an attribute pin to a Get/Set Material Attributes node, or returns the existing one if
+        that attribute is already exposed. Idempotent. Wire it afterwards with
+        material_connect_expressions, using the attribute name as the pin name.
+
+        Never write AttributeGetTypes / AttributeSetTypes directly to do this. The pin array is
+        resized from a PreEditChange snapshot that scripted property writes never fill, so the two
+        arrays drift apart and the asset asserts on load from then on. This routes through the
+        engine's CreateOrGet*Attribute, which updates both as one operation.
+
+        attribute is case-insensitive ("BaseColor", "Specular", "Roughness", ...); a miss lists the
+        accepted names in the error. Returns the attribute_pin_list shape plus {"index",
+        "attribute"} for the pin resolved."""
+        if not attribute:
+            raise ValueError("attribute is required")
+        if not expression_guid:
+            raise ValueError("expression_guid is required")
+        params = _graph_host(material_path, function_path)
+        params.update({"expression_guid": expression_guid, "attribute": attribute})
+        return conn.call("material.attribute_pin_add", params)
