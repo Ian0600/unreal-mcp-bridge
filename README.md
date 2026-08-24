@@ -20,7 +20,7 @@ MCP Client (Claude, etc.)
 
 ## What It Covers
 
-175 editor methods, each exposed as exactly one MCP tool. The point of most of them is not
+176 editor methods, each exposed as exactly one MCP tool. The point of most of them is not
 convenience — it is that the equivalent edit is either unreachable from Unreal's Python API or
 quietly wrong when done there, because the Python route bypasses the editor utilities that keep
 an asset's parallel structures in agreement.
@@ -40,7 +40,7 @@ an asset's parallel structures in agreement.
 | `camvar.*`        | 4       | Camera variable collections                                                    |
 | `skeletalmesh.*`  | 3       | Attachment sockets on a mesh or its skeleton, with preview assets              |
 | `camerarig.*`     | 3       | Camera rig assets and their node parameters                                    |
-| `level.*`         | 2       | Level FBX export, placing assets in the level                                  |
+| `level.*`         | 3       | Level FBX export, placing assets in the level, the level selection             |
 | `pie.*`           | 2       | Play-In-Editor start/stop                                                      |
 | `compile.*`       | 2       | Live Coding trigger and status                                                 |
 

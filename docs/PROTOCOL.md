@@ -226,9 +226,26 @@ never binary payloads over the protocol.
 | Method                  | Params                                                                                 | Result fields                                                                     | Description                                        |
 |-------------------------|----------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------|----------------------------------------------------|
 | `level.export_selected` | `path: string, selected_only?: bool` (def. true)`, include_collision?: bool` (def. false)`, ascii?: bool` (def. false) | `path, exists: bool, size_bytes: int, actor_count: int, actors: [string], skipped: [string], actors_truncated: bool` | Exports selected level actors to one FBX           |
-| `asset.export_fbx`      | `path: string, object_path?: string, object_paths?: [string], ascii?: bool, include_collision?: bool, include_lods?: bool, include_morph_targets?: bool` (def. true) | `exported: [{object_path, path, class, size_bytes}], count: int, skipped: [{object_path, reason}], from_content_browser_selection: bool` | Exports individual mesh assets, one FBX each       |
+| `asset.export_fbx`      | `path: string, object_path?: string, object_paths?: [string], ascii?: bool, include_collision?: bool, include_lods?: bool, include_morph_targets?: bool` (def. true)`, export_preview_mesh?: bool` (def. true) | `exported: [{object_path, path, class, size_bytes, sections, cloth_sections_excluded, warning?, preview_mesh_included?}], count: int, skipped: [{object_path, reason}], from_content_browser_selection: bool` | Exports individual mesh assets or anim sequences, one FBX each |
 | `asset.import_fbx`      | `path: string, destination_path: string, replace_existing?: bool` (def. true)`, import_as_skeletal?: bool, skeleton_path?: string, combine_meshes?: bool, generate_lightmap_uvs?: bool` (def. true)`, auto_generate_collision?: bool, save?: bool` (def. true)`, use_interchange?: bool` | `imported: [string], count: int, saved: bool`                                     | Imports an FBX into the content browser            |
 | `level.spawn_asset`     | `object_path: string, location?: [x,y,z], rotation?: [pitch,yaw,roll], scale?: [x,y,z], label?: string` | `actor_name: string, class: string, actor_path: string`                           | Places an imported asset in the current level      |
+| `level.get_selection`   | —                                                                                      | `count: int, actors: [{name, class, location: [x,y,z]}]`                          | Returns the current level (actor) selection        |
+
+**Read the `warning` field on an export before reporting success.** Unreal's own FBX exporter
+drops cloth-simulated sections deliberately — `FFbxExporter::CreateMesh` builds its vertex list
+from `FSkeletalMeshLODModel::GetNonClothVertices()` — so a character whose body is cloth-driven
+exports as whatever sections are left, with a plausible vertex count and no error. `sections` and
+`cloth_sections_excluded` report what happened and `warning` names it. There is no
+`UFbxExportOption` that turns this off.
+
+Anim sequences export too, and the same caution applies for a different reason: notifies, sync
+markers and custom curves have no FBX representation and are lost, and additive animations come
+out as raw poses. `export_preview_mesh` (default true) is what keeps the clip from exporting as a
+bare skeleton.
+
+**Selection.** `level.get_selection` and `asset.get_selection` answer different questions and are
+not interchangeable: picking a SkeletalMesh in the Content Browser leaves `GetSelectedActors`
+empty, which reads as "nothing is selected" if only one of the two is consulted.
 
 **Which exporter to use.** `level.export_selected` writes every mesh component of every
 selected actor into a single file — selecting a Blueprint character drags all of its skeletal
