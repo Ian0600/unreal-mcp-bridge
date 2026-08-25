@@ -73,7 +73,8 @@ Example usage: `-32000` for "Editor not ready", `-32001` for "Asset not found".
 ## Method Catalogue
 
 The tables below cover the core domains in detail. The bridge also serves `animgraph.*`,
-`animnotify.*`, `montage.*`, `statetree.*`, `camerarig.*`, `camvar.*`, `material.*` and `niagara.*`, which are
+`animnotify.*`, `montage.*`, `statetree.*`, `camerarig.*`, `camvar.*`, `material.*`, `niagara.*` and
+`object.*`, which are
 documented by the docstrings on their `@mcp.tool()` wrappers in
 `Python/unreal_mcp_bridge/tools/`. Every registered method has exactly one such wrapper, so the
 tool list an MCP client sees and this catalogue are the same set. The authoritative list of methods is the set of

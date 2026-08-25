@@ -39,12 +39,18 @@ an asset's parallel structures in agreement.
 | `editor.*`        | 4       | Editor status, actor listing and spawning, Python exec                         |
 | `camvar.*`        | 4       | Camera variable collections                                                    |
 | `skeletalmesh.*`  | 3       | Attachment sockets on a mesh or its skeleton, with preview assets              |
-| `camerarig.*`     | 3       | Camera rig assets and their node parameters                                    |
+| `camerarig.*`     | 8       | Camera rig assets: node tree, wiring, node add/remove, exposed parameter defaults |
 | `level.*`         | 3       | Level FBX export, placing assets in the level, the level selection             |
 | `pie.*`           | 2       | Play-In-Editor start/stop                                                      |
 | `compile.*`       | 2       | Live Coding trigger and status                                                 |
+| `object.*`        | 3       | Any UObject's properties by reflection - the escape hatch for what no domain handler covers |
 
 A few examples of the difference this makes:
+
+- **Any property at all.** The editor's Python API only wraps what the engine chose to expose, so
+  private and protected `UPROPERTY`s and whole `UCLASS(MinimalAPI)` types answer "failed to find
+  property" or "is protected and cannot be read"; the console `set` command is refused outright in
+  the editor. `object.*` reads and writes them by reflection, which ignores C++ access specifiers.
 
 - **Anim notifies.** `UAnimSequenceBase::Notifies` is script-protected, so a montage's hit window
   cannot be authored from Python at all.

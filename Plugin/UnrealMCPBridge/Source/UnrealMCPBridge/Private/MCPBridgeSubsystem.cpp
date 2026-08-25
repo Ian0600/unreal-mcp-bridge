@@ -1,9 +1,10 @@
-#include "MCPBridgeSubsystem.h"
+﻿#include "MCPBridgeSubsystem.h"
 #include "UnrealMCPBridgeModule.h"
 #include "MCPSettings.h"
 #include "Editor.h"
 #include "Misc/CoreDelegates.h"
 #include "Commands/EditorCommands.h"
+#include "Commands/ObjectCommands.h"
 #include "Commands/BlueprintCommands.h"
 #include "Commands/AssetCommands.h"
 #include "Commands/CompileCommands.h"
@@ -51,6 +52,7 @@ void UMCPBridgeSubsystem::StartListener()
         Registry = MakeShared<FMCPCommandRegistry>();
 
         Handlers.Add(MakeShared<FEditorCommandHandler>());
+        Handlers.Add(MakeShared<FObjectCommandHandler>());
         Handlers.Add(MakeShared<FBlueprintCommandHandler>());
         Handlers.Add(MakeShared<FAssetCommandHandler>());
         Handlers.Add(MakeShared<FCompileCommandHandler>());
