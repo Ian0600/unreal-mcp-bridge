@@ -3,6 +3,7 @@
 #include "MCPProtocol.h"
 #include "Async/Async.h"
 #include "Async/Future.h"
+#include "Containers/Ticker.h"
 #include "SocketSubsystem.h"
 #include "SocketTypes.h"
 #include "IPAddress.h"
@@ -330,17 +331,34 @@ MCPProtocol::FMCPResponse FMCPServerRunnable::DispatchToGameThread(const MCPProt
     TSharedPtr<FJsonValue>  Id     = Request.Id;
     TSharedRef<FMCPCommandRegistry> Registry = CommandRegistry;
 
-    TPromise<MCPProtocol::FMCPResponse> Promise;
-    TFuture<MCPProtocol::FMCPResponse>  Future = Promise.GetFuture();
+    // Shared rather than moved: keeps the delegate copy-constructible, and keeps a promise
+    // abandoned by the timeout below alive until the GameThread finally runs the handler.
+    TSharedRef<TPromise<MCPProtocol::FMCPResponse>> Promise = MakeShared<TPromise<MCPProtocol::FMCPResponse>>();
+    TFuture<MCPProtocol::FMCPResponse> Future = Promise->GetFuture();
 
-    AsyncTask(ENamedThreads::GameThread, [Method, Params, Id, Registry, Promise = MoveTemp(Promise)]() mutable
+    // Deliberately NOT AsyncTask/FFunctionGraphTask.
+    //
+    // This runnable's thread comes from FRunnableThread::Create, so it was never spawned from
+    // the GameThread's task graph and carries no FAppTime inherited context. A graph task
+    // created here copies that empty context and pushes it via FInheritedContextScope while the
+    // task runs - even though the task runs on the GameThread. Any handler that then reads
+    // FApp::GetCurrentTime()/GetDeltaTime() - spawning an actor, registering a skeletal mesh
+    // component, anything world- or tick-related - trips
+    //     Ensure condition failed: IsInGameThread()  [Misc/AppTime.cpp]
+    // which breaks into the debugger and wedges the editor for as long as that modal stands;
+    // every later MCP call then times out or gets connection-refused.
+    //
+    // FTSTicker delegates are invoked straight from the engine tick on the GameThread, with the
+    // GameThread's own context in effect, so no bogus scope is pushed. AddTicker is thread-safe.
+    FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+        [Method, Params, Id, Registry, Promise](float /*DeltaTime*/)
     {
         TSharedPtr<FJsonObject> Result;
         MCPProtocol::FMCPError DispatchError;
 
         if (Registry->Dispatch(Method, Params, Result, DispatchError))
         {
-            Promise.SetValue(MCPProtocol::MakeResult(Id, Result));
+            Promise->SetValue(MCPProtocol::MakeResult(Id, Result));
         }
         else
         {
@@ -350,9 +368,11 @@ MCPProtocol::FMCPResponse FMCPServerRunnable::DispatchToGameThread(const MCPProt
             // explain partial failures (which assets were skipped, and why).
             MCPProtocol::FMCPResponse ErrorResponse = MCPProtocol::MakeError(Id, DispatchError.Code, DispatchError.Message);
             ErrorResponse.Error->Data = DispatchError.Data;
-            Promise.SetValue(MoveTemp(ErrorResponse));
+            Promise->SetValue(MoveTemp(ErrorResponse));
         }
-    });
+
+        return false; // one-shot
+    }), 0.0f);
 
     const FTimespan Timeout = FTimespan::FromSeconds(static_cast<double>(DispatchTimeoutSec));
     if (Future.WaitFor(Timeout))
