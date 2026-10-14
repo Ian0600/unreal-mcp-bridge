@@ -20,17 +20,23 @@ class MCPRemoteError(Exception):
 
 
 class UnrealConnection:
-    """Persistent TCP connection to the UE MCP Bridge plugin."""
+    """TCP client for the UE MCP Bridge plugin.
+
+    By default every call opens its own short-lived connection and closes it after the reply,
+    so the UE listener is only occupied while a request is in flight and concurrent calls (from
+    threads or from several MCP servers) do not wait on each other. With
+    ``Settings.persistent`` one connection is kept open and calls are serialized over it.
+    """
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._sock: socket.socket | None = None
         self._lock = threading.Lock()
         self._id_counter = itertools.count(1)
-        # Buffer for partial lines received across multiple recv calls.
+        # Buffer for partial lines received across multiple recv calls (persistent mode only).
         self._recv_buffer = b""
 
-    def connect(self) -> None:
+    def _open(self) -> socket.socket:
         """Open a TCP connection to the UE plugin listener. Raises on failure."""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(self._settings.connect_timeout)
@@ -44,10 +50,14 @@ class UnrealConnection:
             ) from exc
         # Switch to blocking mode with request timeout for subsequent IO.
         sock.settimeout(self._settings.request_timeout)
-        self._sock = sock
+        return sock
+
+    def connect(self) -> None:
+        """Open the persistent connection (persistent mode). Raises on failure."""
+        self._sock = self._open()
+        self._recv_buffer = b""
 
     def _ensure_connected(self) -> None:
-        """Reconnect once if the socket appears to have been closed."""
         if self._sock is None:
             self.connect()
 
@@ -62,39 +72,30 @@ class UnrealConnection:
         Raises MCPRemoteError when the plugin returns an error response.
         Raises ConnectionError / TimeoutError on IO failures.
         """
-        with self._lock:
-            self._ensure_connected()
-            assert self._sock is not None
+        request_id = next(self._id_counter)
+        payload: dict[str, Any] = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": method,
+        }
+        if params is not None:
+            payload["params"] = params
+        encoded = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
 
-            request_id = next(self._id_counter)
-            payload: dict[str, Any] = {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": method,
-            }
-            if params is not None:
-                payload["params"] = params
-
-            line = json.dumps(payload, ensure_ascii=False) + "\n"
-            encoded = line.encode("utf-8")
-
-            # Send the request.
+        if self._settings.persistent:
+            with self._lock:
+                self._ensure_connected()
+                assert self._sock is not None
+                response_line = self._exchange(encoded, timeout, persistent=True)
+        else:
+            sock = self._open()
             try:
-                self._sock.sendall(encoded)
-            except OSError as exc:
-                self._sock = None
-                raise ConnectionError(f"Send failed: {exc}") from exc
-
-            # Override timeout for this call if requested.
-            if timeout is not None:
-                self._sock.settimeout(timeout)
-
-            # Receive the response line.
-            response_line = self._recv_line()
-
-            if timeout is not None:
-                # Restore default timeout.
-                self._sock.settimeout(self._settings.request_timeout)
+                response_line = self._exchange(encoded, timeout, persistent=False, sock=sock)
+            finally:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
 
         # Parse and validate the response.
         try:
@@ -117,38 +118,71 @@ class UnrealConnection:
 
         return response.get("result") or {}
 
-    def _recv_line(self) -> str:
-        """Read bytes until a newline delimiter, respecting max_line_bytes."""
-        assert self._sock is not None
-        max_bytes = self._settings.max_line_bytes
-
-        while b"\n" not in self._recv_buffer:
-            if len(self._recv_buffer) >= max_bytes:
+    def _exchange(
+        self,
+        encoded: bytes,
+        timeout: float | None,
+        persistent: bool,
+        sock: socket.socket | None = None,
+    ) -> str:
+        """Send one request line and read one response line."""
+        active = self._sock if persistent else sock
+        assert active is not None
+        try:
+            active.sendall(encoded)
+        except OSError as exc:
+            if persistent:
                 self._sock = None
+            raise ConnectionError(f"Send failed: {exc}") from exc
+
+        # Override timeout for this call if requested.
+        if timeout is not None:
+            active.settimeout(timeout)
+
+        line = self._recv_line(active, persistent)
+
+        if timeout is not None and persistent and self._sock is not None:
+            # Restore default timeout.
+            self._sock.settimeout(self._settings.request_timeout)
+        return line
+
+    def _recv_line(self, sock: socket.socket, persistent: bool) -> str:
+        """Read bytes until a newline delimiter, respecting max_line_bytes."""
+        max_bytes = self._settings.max_line_bytes
+        buffer = self._recv_buffer if persistent else b""
+
+        def drop() -> None:
+            if persistent:
+                self._sock = None
+
+        while b"\n" not in buffer:
+            if len(buffer) >= max_bytes:
+                drop()
                 raise ConnectionError(
                     f"Response line exceeded {max_bytes} bytes without a newline delimiter"
                 )
             try:
-                chunk = self._sock.recv(4096)
+                chunk = sock.recv(4096)
             except socket.timeout as exc:
-                self._sock = None
+                drop()
                 raise TimeoutError("Timed out waiting for response from UE plugin") from exc
             except OSError as exc:
-                self._sock = None
+                drop()
                 raise ConnectionError(f"Receive failed: {exc}") from exc
 
             if not chunk:
-                self._sock = None
+                drop()
                 raise ConnectionError("Connection closed by UE plugin while waiting for response")
-            self._recv_buffer += chunk
+            buffer += chunk
 
-        newline_pos = self._recv_buffer.index(b"\n")
-        line_bytes = self._recv_buffer[:newline_pos]
-        self._recv_buffer = self._recv_buffer[newline_pos + 1:]
+        newline_pos = buffer.index(b"\n")
+        line_bytes = buffer[:newline_pos]
+        if persistent:
+            self._recv_buffer = buffer[newline_pos + 1:]
         return line_bytes.decode("utf-8")
 
     def close(self) -> None:
-        """Close the connection."""
+        """Close the persistent connection, if any."""
         with self._lock:
             if self._sock is not None:
                 try:

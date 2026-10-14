@@ -14,9 +14,44 @@
 #include "K2Node_FunctionResult.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/Package.h"
+#include "Commands/InspectorInvoke.h"
 
 void FBlueprintCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
+    // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
+    Registry.Register(TEXT("blueprint.connect_pins"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("ConnectPins"), { TEXT("asset_path"), TEXT("source_node_name"), TEXT("source_pin_name"), TEXT("target_node_name"), TEXT("target_pin_name") }));
+    Registry.Register(TEXT("blueprint.connect_pins_in_graph"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("ConnectPinsInGraph"), { TEXT("asset_path"), TEXT("graph_name"), TEXT("source_node_name"), TEXT("source_pin_name"), TEXT("target_node_name"), TEXT("target_pin_name") }));
+    Registry.Register(TEXT("blueprint.disconnect_pin"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DisconnectPin"), { TEXT("asset_path"), TEXT("node_name"), TEXT("pin_name") }));
+    Registry.Register(TEXT("blueprint.set_pin_default_value"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetPinDefaultValue"), { TEXT("asset_path"), TEXT("node_name"), TEXT("pin_name"), TEXT("new_value") }));
+    Registry.Register(TEXT("blueprint.set_pin_default_value_by_graph_index"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetPinDefaultValueByGraphIndex"), { TEXT("asset_path"), TEXT("graph_index"), TEXT("node_index"), TEXT("pin_name"), TEXT("new_value") }));
+    Registry.Register(TEXT("blueprint.remove_node"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("RemoveNode"), { TEXT("asset_path"), TEXT("node_name") }));
+    Registry.Register(TEXT("blueprint.add_call_function_node"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("AddCallFunctionNode"), { TEXT("asset_path"), TEXT("graph_name"), TEXT("function_name"), TEXT("pos_x"), TEXT("pos_y") }));
+    Registry.Register(TEXT("blueprint.add_variable_get_node"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("AddVariableGetNode"), { TEXT("asset_path"), TEXT("graph_name"), TEXT("var_name"), TEXT("pos_x"), TEXT("pos_y") }));
+    Registry.Register(TEXT("blueprint.add_variable_set_node"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("AddVariableSetNode"), { TEXT("asset_path"), TEXT("graph_name"), TEXT("var_name"), TEXT("pos_x"), TEXT("pos_y") }));
+    Registry.Register(TEXT("blueprint.add_array_get_item_node"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("AddArrayGetItemNode"), { TEXT("asset_path"), TEXT("graph_name"), TEXT("pos_x"), TEXT("pos_y") }));
+    Registry.Register(TEXT("blueprint.reconstruct_node"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("ReconstructNode"), { TEXT("asset_path"), TEXT("node_name") }));
+    Registry.Register(TEXT("blueprint.reconstruct_node_by_graph_index"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("ReconstructNodeByGraphIndex"), { TEXT("asset_path"), TEXT("graph_index"), TEXT("node_index") }));
+    Registry.Register(TEXT("blueprint.get_graphs"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("GetBlueprintGraphs"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.get_graph_nodes_by_index"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("GetGraphNodesByIndex"), { TEXT("asset_path"), TEXT("graph_index") }));
+    Registry.Register(TEXT("blueprint.get_all_nodes"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("GetAllNodesInBlueprint"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.duplicate_with_remap"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DuplicateBlueprintWithRemap"), { TEXT("source_asset_path"), TEXT("dest_asset_path"), TEXT("new_skeleton"), TEXT("asset_substitutions") }));
+    Registry.Register(TEXT("blueprint.reparent_checked"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("ReparentBlueprintChecked"), { TEXT("blueprint_path"), TEXT("expected_old_parent"), TEXT("new_parent") }));
+    Registry.Register(TEXT("blueprint.get_header"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("GetAnimBlueprintHeader"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.dump_asset_references"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpAssetReferences"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.dump_cdo_references"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpCDOReferences"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.dump_function_calls"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpFunctionCalls"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.dump_variable_usages"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpVariableUsages"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.dump_event_entries"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpEventEntries"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.dump_function_signatures"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpFunctionSignatures"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.dump_mpc_bindings"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpBlueprintMPCBindingsJson"), { TEXT("blueprint_path"), TEXT("collection_path") }));
+    Registry.Register(TEXT("blueprint.remap_mpc_call_checked"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("RemapMPCBlueprintCallChecked"), { TEXT("blueprint_path"), TEXT("graph_name"), TEXT("node_guid"), TEXT("collection_path"), TEXT("expected_source_name"), TEXT("retained_target_name"), TEXT("expected_shared_guid") }));
+    Registry.Register(TEXT("blueprint.create_interface"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIInterfaceToolset"), TEXT("CreateBlueprintInterface"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("blueprint.add_interface_function"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIInterfaceToolset"), TEXT("AddInterfaceFunction"), { TEXT("interface_path"), TEXT("function_name"), TEXT("inputs"), TEXT("outputs") }));
+    Registry.Register(TEXT("blueprint.implement_interface"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIInterfaceToolset"), TEXT("ImplementInterface"), { TEXT("blueprint_path"), TEXT("interface_path") }));
+    Registry.Register(TEXT("blueprint.remove_interface"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIInterfaceToolset"), TEXT("RemoveInterface"), { TEXT("blueprint_path"), TEXT("interface_path"), TEXT("preserve_functions") }));
+    Registry.Register(TEXT("blueprint.list_implemented_interfaces"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIInterfaceToolset"), TEXT("ListImplementedInterfaces"), { TEXT("blueprint_path") }));
+    // ---- END forwarded commands ----
+
     // blueprint.create — creates a new Blueprint asset under the given package path
     Registry.Register(TEXT("blueprint.create"),
         [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>

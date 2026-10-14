@@ -8,9 +8,14 @@
 #include "EditorAssetLibrary.h"
 #include "EditorUtilityLibrary.h"
 #include "Editor.h"
+#include "Commands/InspectorInvoke.h"
 
 void FAssetCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
+    // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
+    Registry.Register(TEXT("asset.fixup_redirectors"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIEditorToolset"), TEXT("FixupRedirectors"), { TEXT("content_paths") }));
+    // ---- END forwarded commands ----
+
     // asset.list — returns assets under a given content path
     Registry.Register(TEXT("asset.list"),
         [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>

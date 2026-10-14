@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "IPythonScriptPlugin.h"
 #include "PythonScriptTypes.h"
+#include "Commands/InspectorInvoke.h"
 
 namespace
 {
@@ -19,6 +20,10 @@ namespace
 
 void FEditorCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
+    // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
+    Registry.Register(TEXT("editor.console_exec"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIEditorToolset"), TEXT("ExecuteConsoleCommand"), { TEXT("command") }));
+    // ---- END forwarded commands ----
+
     // editor.get_status — returns current level name, selection counts, PIE state
     Registry.Register(TEXT("editor.get_status"),
         [](const TSharedPtr<FJsonObject>& /*Params*/, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>

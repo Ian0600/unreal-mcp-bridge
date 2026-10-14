@@ -55,3 +55,13 @@ def register_asset_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         if not paths:
             raise ValueError("object_paths is required and must be non-empty")
         return conn.call("asset.set_selection", {"object_paths": paths, "focus": focus})
+
+    @mcp.tool()
+    def asset_fixup_redirectors(content_paths: list[str]) -> dict:
+        """Fix up redirectors under the given content paths (re-save referencers, delete redirectors).
+        Referencing packages are saved; check them out of source control first if required.
+        content_paths: Folders like "/Game/Characters" (recursive).
+        Returns: JSON: {"found":int,"fixed":int,"remaining":[paths]}
+
+        Forwarded to BlueprintInspector (BPIEditorToolset::FixupRedirectors); requires that plugin to be loaded."""
+        return conn.call("asset.fixup_redirectors", {"content_paths": content_paths})

@@ -16,6 +16,9 @@ public:
     // Returns true if a handler is registered for the given method.
     bool Has(const FString& Method) const;
 
+    // All registered method names, sorted.
+    TArray<FString> GetMethods() const;
+
     // Invoke the handler for Method with Params.
     // Returns true on success and sets OutResult.
     // Returns false and sets OutError when the method is not found or the handler reports an error.

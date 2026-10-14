@@ -16,6 +16,14 @@ bool FMCPCommandRegistry::Has(const FString& Method) const
     return Handlers.Contains(Method);
 }
 
+TArray<FString> FMCPCommandRegistry::GetMethods() const
+{
+    TArray<FString> Methods;
+    Handlers.GetKeys(Methods);
+    Methods.Sort();
+    return Methods;
+}
+
 bool FMCPCommandRegistry::Dispatch(
     const FString& Method,
     const TSharedPtr<FJsonObject>& Params,

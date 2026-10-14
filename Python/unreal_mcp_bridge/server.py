@@ -23,6 +23,8 @@ from .tools import (
     register_skeletalmesh_tools,
     register_widget_tools,
     register_widgetanim_tools,
+    register_behaviortree_tools,
+    register_blendspace_tools,
 )
 
 
@@ -50,6 +52,8 @@ def main() -> None:
     register_skeletalmesh_tools(mcp, conn)
     register_widget_tools(mcp, conn)
     register_widgetanim_tools(mcp, conn)
+    register_behaviortree_tools(mcp, conn)
+    register_blendspace_tools(mcp, conn)
 
     try:
         mcp.run(transport="stdio")

@@ -3,6 +3,10 @@
 #include "MCPSettings.h"
 #include "Editor.h"
 #include "Misc/CoreDelegates.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 #include "Commands/EditorCommands.h"
 #include "Commands/ObjectCommands.h"
 #include "Commands/BlueprintCommands.h"
@@ -21,32 +25,18 @@
 #include "Commands/WidgetCommands.h"
 #include "Commands/WidgetAnimCommands.h"
 #include "Commands/LevelIOCommands.h"
+#include "Commands/BlendSpaceCommands.h"
+#include "Commands/BehaviorTreeCommands.h"
 
 void UMCPBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
+    EnsureRegistry();
     StartListener();
 }
 
-void UMCPBridgeSubsystem::StartListener()
+void UMCPBridgeSubsystem::EnsureRegistry()
 {
-    const UMCPSettings* Settings = GetDefault<UMCPSettings>();
-    if (!Settings->bEnabled || Settings->Port <= 0)
-    {
-        UE_LOG(LogMCPBridge, Log,
-            TEXT("MCPBridgeSubsystem: disabled (bEnabled=%s, Port=%d). Set both in Project Settings to activate."),
-            Settings->bEnabled ? TEXT("true") : TEXT("false"),
-            Settings->Port);
-        return;
-    }
-
-    if (Servers.Num() > 0)
-    {
-        // Already listening — nothing to do.
-        return;
-    }
-
-    // Create the command registry + domain handlers once; reuse across restarts.
     if (!Registry.IsValid())
     {
         Registry = MakeShared<FMCPCommandRegistry>();
@@ -69,6 +59,8 @@ void UMCPBridgeSubsystem::StartListener()
         Handlers.Add(MakeShared<FWidgetAnimCommandHandler>());
         Handlers.Add(MakeShared<FLevelIOCommandHandler>());
         Handlers.Add(MakeShared<FSkeletalMeshCommandHandler>());
+        Handlers.Add(MakeShared<FBlendSpaceCommandHandler>());
+        Handlers.Add(MakeShared<FBehaviorTreeCommandHandler>());
 
         for (const TSharedPtr<IMCPCommandHandler>& Handler : Handlers)
         {
@@ -78,6 +70,27 @@ void UMCPBridgeSubsystem::StartListener()
             }
         }
     }
+}
+
+void UMCPBridgeSubsystem::StartListener()
+{
+    const UMCPSettings* Settings = GetDefault<UMCPSettings>();
+    if (!Settings->bEnabled || Settings->Port <= 0)
+    {
+        UE_LOG(LogMCPBridge, Log,
+            TEXT("MCPBridgeSubsystem: disabled (bEnabled=%s, Port=%d). Set both in Project Settings to activate."),
+            Settings->bEnabled ? TEXT("true") : TEXT("false"),
+            Settings->Port);
+        return;
+    }
+
+    if (Servers.Num() > 0)
+    {
+        // Already listening — nothing to do.
+        return;
+    }
+
+    EnsureRegistry();
 
     // 주 포트 + 추가 포트. 같은 포트로 러너블을 둘 띄우면 뒤쪽 Bind가 실패해 리스너
     // 하나가 조용히 죽으므로, 중복과 0 이하는 여기서 걸러낸다.
@@ -156,4 +169,60 @@ void UMCPBridgeSubsystem::HandleEditorExit()
         FCoreDelegates::OnPreExit.Remove(OnExitHandle);
         OnExitHandle.Reset();
     }
+}
+
+FString UMCPBridgeSubsystem::DispatchCommandJson(const FString& Method, const FString& ParamsJson)
+{
+    auto Serialize = [](const TSharedRef<FJsonObject>& Obj)
+    {
+        FString Out;
+        TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+            TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Out);
+        FJsonSerializer::Serialize(Obj, Writer);
+        return Out;
+    };
+    auto MakeError = [&Serialize](int32 Code, const FString& Message)
+    {
+        TSharedRef<FJsonObject> Err = MakeShared<FJsonObject>();
+        Err->SetNumberField(TEXT("code"), Code);
+        Err->SetStringField(TEXT("message"), Message);
+        TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+        Root->SetBoolField(TEXT("ok"), false);
+        Root->SetObjectField(TEXT("error"), Err);
+        return Serialize(Root);
+    };
+
+    if (!IsInGameThread())
+    {
+        return MakeError(MCPProtocol::FMCPError::InternalError, TEXT("DispatchCommandJson must be called on the GameThread"));
+    }
+    EnsureRegistry();
+
+    TSharedPtr<FJsonObject> Params;
+    if (!ParamsJson.TrimStartAndEnd().IsEmpty())
+    {
+        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ParamsJson);
+        if (!FJsonSerializer::Deserialize(Reader, Params) || !Params.IsValid())
+        {
+            return MakeError(MCPProtocol::FMCPError::InvalidParams, TEXT("ParamsJson is not a valid JSON object"));
+        }
+    }
+
+    TSharedPtr<FJsonObject> Result;
+    MCPProtocol::FMCPError Error;
+    if (!Registry->Dispatch(Method, Params, Result, Error))
+    {
+        return MakeError(Error.Code, Error.Message);
+    }
+
+    TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetBoolField(TEXT("ok"), true);
+    Root->SetObjectField(TEXT("result"), Result.IsValid() ? Result : MakeShared<FJsonObject>());
+    return Serialize(Root);
+}
+
+TArray<FString> UMCPBridgeSubsystem::ListCommandMethods()
+{
+    EnsureRegistry();
+    return Registry->GetMethods();
 }

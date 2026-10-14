@@ -5,6 +5,7 @@
 #include "MCPGraphEditLibrary.h"
 #include "Dom/JsonObject.h"
 #include "Animation/AnimBlueprint.h"
+#include "Commands/InspectorInvoke.h"
 
 namespace
 {
@@ -48,6 +49,23 @@ namespace
 
 void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
+    // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
+    Registry.Register(TEXT("animgraph.add_nested_state_machine"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("AddNestedStateMachine"), { TEXT("asset_path"), TEXT("parent_sm_node_name"), TEXT("parent_state_name"), TEXT("nested_machine_name"), TEXT("pos_x"), TEXT("pos_y") }));
+    Registry.Register(TEXT("animgraph.set_all_transitions_automatic"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetAllTransitionsAutomatic"), { TEXT("asset_path"), TEXT("sm_node_name") }));
+    Registry.Register(TEXT("animgraph.fix_blend_list_by_enum_nodes"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("FixBlendListByEnumNodes"), { TEXT("asset_path"), TEXT("enum_path") }));
+    Registry.Register(TEXT("animgraph.rebuild_blend_list_enum_entries"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("RebuildBlendListEnumEntries"), { TEXT("asset_path"), TEXT("enum_path"), TEXT("entry_names") }));
+    Registry.Register(TEXT("animgraph.set_blend_list_enum_entries_by_index"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetBlendListEnumEntriesByIndex"), { TEXT("asset_path"), TEXT("graph_index"), TEXT("node_index"), TEXT("entry_names") }));
+    Registry.Register(TEXT("animgraph.dump_blend_list_enum_info"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpBlendListEnumInfo"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("animgraph.list_node_properties"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("ListAnimGraphNodeProperties"), { TEXT("asset_path"), TEXT("graph_index"), TEXT("node_index") }));
+    Registry.Register(TEXT("animgraph.get_node_property"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("GetAnimGraphNodePropertyByIndex"), { TEXT("asset_path"), TEXT("graph_index"), TEXT("node_index"), TEXT("property_path") }));
+    Registry.Register(TEXT("animgraph.set_node_property"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetAnimGraphNodePropertyByIndex"), { TEXT("asset_path"), TEXT("graph_index"), TEXT("node_index"), TEXT("property_path"), TEXT("value_text") }));
+    Registry.Register(TEXT("animgraph.dump_node_details"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpAnimGraphNodeDetails"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("animgraph.dump_state_machine"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpStateMachineStructure"), { TEXT("asset_path"), TEXT("sm_node_name") }));
+    Registry.Register(TEXT("animgraph.dump_all_state_machines"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpAllStateMachineStructures"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("animgraph.get_settings"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("GetAnimBlueprintSettings"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("animgraph.dump_linked_layer_usage"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpLinkedAnimLayerUsage"), { TEXT("asset_path") }));
+    // ---- END forwarded commands ----
+
     // animgraph.add_state_machine — adds a State Machine node to an AnimGraph.
     // Params: blueprint_path, graph_name (default "AnimGraph"), pos_x, pos_y.
     Registry.Register(TEXT("animgraph.add_state_machine"),

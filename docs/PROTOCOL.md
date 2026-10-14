@@ -6,7 +6,7 @@
 - **Framing**: Single newline character (`\n`) as message delimiter
 - **Encoding**: UTF-8
 - **Line size limit**: 16 MiB (16777216 bytes) by default, settable per side (`MaxLineBytes` in the plugin, `UMCP_MAX_LINE_BYTES` in the Python server). Requests exceeding the plugin's limit receive an `InvalidRequest` error and the connection is closed.
-- **One client per listener**: a listener accepts a single connection and stays in a blocking per-client loop until it drops, so a second client on the same port is refused. To attach several MCP clients at once, give each its own port via `AdditionalPorts` — one listener thread is started per port, all sharing one command registry, which is safe because every handler is serialised onto the GameThread anyway.
+- **Concurrent clients**: a listener serves each accepted connection on its own thread, so several clients can share one port; requests are still executed one at a time on the GameThread. A connection may carry any number of requests, or just one — the bundled Python server opens a connection per call and closes it after the reply. `AdditionalPorts` starts extra listener threads (one per port, all sharing one command registry) but is not required for multiple clients.
 
 ## Message Formats
 
@@ -73,7 +73,7 @@ Example usage: `-32000` for "Editor not ready", `-32001` for "Asset not found".
 ## Method Catalogue
 
 The tables below cover the core domains in detail. The bridge also serves `animgraph.*`,
-`animnotify.*`, `montage.*`, `statetree.*`, `camerarig.*`, `camvar.*`, `material.*`, `niagara.*` and
+`animnotify.*`, `behaviortree.*`, `blendspace.*`, `montage.*`, `statetree.*`, `camerarig.*`, `camvar.*`, `material.*`, `niagara.*` and
 `object.*`, which are
 documented by the docstrings on their `@mcp.tool()` wrappers in
 `Python/unreal_mcp_bridge/tools/`. Every registered method has exactly one such wrapper, so the
@@ -464,3 +464,196 @@ Error code `-32010` is returned when the LiveCoding module is not loaded or cann
 // result
 { "queued": true }
 ```
+
+### Commands forwarded to BlueprintInspector
+
+These methods call a function of the BlueprintInspector plugin in-process (UObject reflection; no module dependency, no extra port). If the plugin is not loaded they fail with `InternalError` (-32603). Params are the function's parameters in snake_case; the result is `{"value": ...}` where `value` is the function's return value (a JSON string return is parsed when it holds an object or array). `FVector` parameters are `[x, y, z]`.
+
+#### animgraph.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `animgraph.add_nested_state_machine` | `asset_path`, `parent_sm_node_name`, `parent_state_name`, `nested_machine_name`, `pos_x`, `pos_y` | `BlueprintInspectorLibrary::AddNestedStateMachine` |
+| `animgraph.set_all_transitions_automatic` | `asset_path`, `sm_node_name` | `BlueprintInspectorLibrary::SetAllTransitionsAutomatic` |
+| `animgraph.fix_blend_list_by_enum_nodes` | `asset_path`, `enum_path` | `BlueprintInspectorLibrary::FixBlendListByEnumNodes` |
+| `animgraph.rebuild_blend_list_enum_entries` | `asset_path`, `enum_path`, `entry_names` | `BlueprintInspectorLibrary::RebuildBlendListEnumEntries` |
+| `animgraph.set_blend_list_enum_entries_by_index` | `asset_path`, `graph_index`, `node_index`, `entry_names` | `BlueprintInspectorLibrary::SetBlendListEnumEntriesByIndex` |
+| `animgraph.dump_blend_list_enum_info` | `asset_path` | `BlueprintInspectorLibrary::DumpBlendListEnumInfo` |
+| `animgraph.list_node_properties` | `asset_path`, `graph_index`, `node_index` | `BlueprintInspectorLibrary::ListAnimGraphNodeProperties` |
+| `animgraph.get_node_property` | `asset_path`, `graph_index`, `node_index`, `property_path` | `BlueprintInspectorLibrary::GetAnimGraphNodePropertyByIndex` |
+| `animgraph.set_node_property` | `asset_path`, `graph_index`, `node_index`, `property_path`, `value_text` | `BlueprintInspectorLibrary::SetAnimGraphNodePropertyByIndex` |
+| `animgraph.dump_node_details` | `asset_path` | `BlueprintInspectorLibrary::DumpAnimGraphNodeDetails` |
+| `animgraph.dump_state_machine` | `asset_path`, `sm_node_name` | `BlueprintInspectorLibrary::DumpStateMachineStructure` |
+| `animgraph.dump_all_state_machines` | `asset_path` | `BlueprintInspectorLibrary::DumpAllStateMachineStructures` |
+| `animgraph.get_settings` | `asset_path` | `BlueprintInspectorLibrary::GetAnimBlueprintSettings` |
+| `animgraph.dump_linked_layer_usage` | `asset_path` | `BlueprintInspectorLibrary::DumpLinkedAnimLayerUsage` |
+
+#### animnotify.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `animnotify.dump_details` | `asset_path` | `BlueprintInspectorLibrary::DumpNotifyDetails` |
+| `animnotify.set_event_timing` | `asset_path`, `notify_index`, `new_trigger_time`, `new_duration` | `BlueprintInspectorLibrary::SetNotifyEventTiming` |
+
+#### asset.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `asset.fixup_redirectors` | `content_paths` | `BPIEditorToolset::FixupRedirectors` |
+
+#### behaviortree.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `behaviortree.create_blackboard` | `asset_path`, `parent_blackboard_path` | `BPIBehaviorTreeToolset::CreateBlackboard` |
+| `behaviortree.add_blackboard_key` | `blackboard_path`, `key_name`, `key_type`, `base_class_or_enum_path`, `instance_synced` | `BPIBehaviorTreeToolset::AddBlackboardKey` |
+| `behaviortree.remove_blackboard_key` | `blackboard_path`, `key_name` | `BPIBehaviorTreeToolset::RemoveBlackboardKey` |
+| `behaviortree.create` | `asset_path`, `blackboard_path` | `BPIBehaviorTreeToolset::CreateBehaviorTree` |
+| `behaviortree.add_node` | `tree_path`, `parent_node_id`, `node_class`, `child_index` | `BPIBehaviorTreeToolset::AddBTNode` |
+| `behaviortree.add_aux_node` | `tree_path`, `node_id`, `aux_class` | `BPIBehaviorTreeToolset::AddBTAuxNode` |
+| `behaviortree.set_node_property` | `tree_path`, `node_id`, `property_path`, `value_text` | `BPIBehaviorTreeToolset::SetBTNodeProperty` |
+| `behaviortree.remove_node` | `tree_path`, `node_id` | `BPIBehaviorTreeToolset::RemoveBTNode` |
+| `behaviortree.dump` | `tree_path` | `BPIBehaviorTreeToolset::DumpBehaviorTree` |
+
+#### blendspace.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `blendspace.dump_structure` | `asset_path` | `BlueprintInspectorLibrary::DumpBlendSpaceStructure` |
+| `blendspace.add_sample` | `asset_path`, `sequence_path`, `x`, `y` | `BlueprintInspectorLibrary::AddBlendSpaceSample` |
+| `blendspace.move_sample` | `asset_path`, `sample_index`, `x`, `y` | `BlueprintInspectorLibrary::MoveBlendSpaceSample` |
+| `blendspace.replace_sample_animation` | `asset_path`, `sample_index`, `sequence_path` | `BlueprintInspectorLibrary::ReplaceBlendSpaceSampleAnimation` |
+| `blendspace.remove_sample` | `asset_path`, `sample_index` | `BlueprintInspectorLibrary::RemoveBlendSpaceSample` |
+| `blendspace.set_sample_rate_scale` | `asset_path`, `sample_index`, `rate_scale` | `BlueprintInspectorLibrary::SetBlendSpaceSampleRateScale` |
+| `blendspace.set_axis` | `asset_path`, `axis_index`, `axis_name`, `min`, `max`, `grid_num`, `snap_to_grid`, `wrap_input` | `BlueprintInspectorLibrary::SetBlendSpaceAxis` |
+
+#### blueprint.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `blueprint.connect_pins` | `asset_path`, `source_node_name`, `source_pin_name`, `target_node_name`, `target_pin_name` | `BlueprintInspectorLibrary::ConnectPins` |
+| `blueprint.connect_pins_in_graph` | `asset_path`, `graph_name`, `source_node_name`, `source_pin_name`, `target_node_name`, `target_pin_name` | `BlueprintInspectorLibrary::ConnectPinsInGraph` |
+| `blueprint.disconnect_pin` | `asset_path`, `node_name`, `pin_name` | `BlueprintInspectorLibrary::DisconnectPin` |
+| `blueprint.set_pin_default_value` | `asset_path`, `node_name`, `pin_name`, `new_value` | `BlueprintInspectorLibrary::SetPinDefaultValue` |
+| `blueprint.set_pin_default_value_by_graph_index` | `asset_path`, `graph_index`, `node_index`, `pin_name`, `new_value` | `BlueprintInspectorLibrary::SetPinDefaultValueByGraphIndex` |
+| `blueprint.remove_node` | `asset_path`, `node_name` | `BlueprintInspectorLibrary::RemoveNode` |
+| `blueprint.add_call_function_node` | `asset_path`, `graph_name`, `function_name`, `pos_x`, `pos_y` | `BlueprintInspectorLibrary::AddCallFunctionNode` |
+| `blueprint.add_variable_get_node` | `asset_path`, `graph_name`, `var_name`, `pos_x`, `pos_y` | `BlueprintInspectorLibrary::AddVariableGetNode` |
+| `blueprint.add_variable_set_node` | `asset_path`, `graph_name`, `var_name`, `pos_x`, `pos_y` | `BlueprintInspectorLibrary::AddVariableSetNode` |
+| `blueprint.add_array_get_item_node` | `asset_path`, `graph_name`, `pos_x`, `pos_y` | `BlueprintInspectorLibrary::AddArrayGetItemNode` |
+| `blueprint.reconstruct_node` | `asset_path`, `node_name` | `BlueprintInspectorLibrary::ReconstructNode` |
+| `blueprint.reconstruct_node_by_graph_index` | `asset_path`, `graph_index`, `node_index` | `BlueprintInspectorLibrary::ReconstructNodeByGraphIndex` |
+| `blueprint.get_graphs` | `asset_path` | `BlueprintInspectorLibrary::GetBlueprintGraphs` |
+| `blueprint.get_graph_nodes_by_index` | `asset_path`, `graph_index` | `BlueprintInspectorLibrary::GetGraphNodesByIndex` |
+| `blueprint.get_all_nodes` | `asset_path` | `BlueprintInspectorLibrary::GetAllNodesInBlueprint` |
+| `blueprint.duplicate_with_remap` | `source_asset_path`, `dest_asset_path`, `new_skeleton`, `asset_substitutions` | `BlueprintInspectorLibrary::DuplicateBlueprintWithRemap` |
+| `blueprint.reparent_checked` | `blueprint_path`, `expected_old_parent`, `new_parent` | `BlueprintInspectorLibrary::ReparentBlueprintChecked` |
+| `blueprint.get_header` | `asset_path` | `BlueprintInspectorLibrary::GetAnimBlueprintHeader` |
+| `blueprint.dump_asset_references` | `asset_path` | `BlueprintInspectorLibrary::DumpAssetReferences` |
+| `blueprint.dump_cdo_references` | `asset_path` | `BlueprintInspectorLibrary::DumpCDOReferences` |
+| `blueprint.dump_function_calls` | `asset_path` | `BlueprintInspectorLibrary::DumpFunctionCalls` |
+| `blueprint.dump_variable_usages` | `asset_path` | `BlueprintInspectorLibrary::DumpVariableUsages` |
+| `blueprint.dump_event_entries` | `asset_path` | `BlueprintInspectorLibrary::DumpEventEntries` |
+| `blueprint.dump_function_signatures` | `asset_path` | `BlueprintInspectorLibrary::DumpFunctionSignatures` |
+| `blueprint.dump_mpc_bindings` | `blueprint_path`, `collection_path` | `BlueprintInspectorLibrary::DumpBlueprintMPCBindingsJson` |
+| `blueprint.remap_mpc_call_checked` | `blueprint_path`, `graph_name`, `node_guid`, `collection_path`, `expected_source_name`, `retained_target_name`, `expected_shared_guid` | `BlueprintInspectorLibrary::RemapMPCBlueprintCallChecked` |
+| `blueprint.create_interface` | `asset_path` | `BPIInterfaceToolset::CreateBlueprintInterface` |
+| `blueprint.add_interface_function` | `interface_path`, `function_name`, `inputs`, `outputs` | `BPIInterfaceToolset::AddInterfaceFunction` |
+| `blueprint.implement_interface` | `blueprint_path`, `interface_path` | `BPIInterfaceToolset::ImplementInterface` |
+| `blueprint.remove_interface` | `blueprint_path`, `interface_path`, `preserve_functions` | `BPIInterfaceToolset::RemoveInterface` |
+| `blueprint.list_implemented_interfaces` | `blueprint_path` | `BPIInterfaceToolset::ListImplementedInterfaces` |
+
+#### editor.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `editor.console_exec` | `command` | `BPIEditorToolset::ExecuteConsoleCommand` |
+
+#### material.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `material.dump_property_connections` | `asset_path` | `BlueprintInspectorLibrary::DumpMaterialPropertyConnections` |
+| `material.find_using_collection` | `collection_path` | `BlueprintInspectorLibrary::FindMaterialsUsingCollection` |
+| `material.set_root_node_position` | `asset_path`, `pos_x`, `pos_y` | `BlueprintInspectorLibrary::SetMaterialRootNodePosition` |
+| `material.set_custom_data_constant` | `asset_path`, `custom_data_index`, `value` | `BlueprintInspectorLibrary::SetMaterialCustomDataConstant` |
+| `material.get_custom_data_info` | `asset_path`, `custom_data_index` | `BlueprintInspectorLibrary::GetMaterialCustomDataInfo` |
+| `material.dump_function_contract` | `asset_path` | `BlueprintInspectorLibrary::DumpMaterialFunctionContractJson` |
+| `material.dump_function_caller_contract` | `caller_path`, `function_paths` | `BlueprintInspectorLibrary::DumpMaterialFunctionCallerContractJson` |
+| `material.dump_mpc_contract` | `collection_path` | `BlueprintInspectorLibrary::DumpMPCContractJson` |
+| `material.dump_mpc_bindings` | `asset_path`, `collection_path` | `BlueprintInspectorLibrary::DumpMaterialMPCBindingsJson` |
+| `material.merge_parameter_collection_checked` | `target_path`, `source_path`, `expected_target_contract_json` | `BlueprintInspectorLibrary::MergeMaterialParameterCollectionAdditiveChecked` |
+| `material.reconnect_function_call_checked` | `caller_path`, `node_id`, `expected_function_path`, `expected_function_contract_json`, `reconnect_spec_json` | `BlueprintInspectorLibrary::ReconnectMaterialFunctionCallChecked` |
+
+#### montage.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `montage.dump_structure` | `asset_path` | `BlueprintInspectorLibrary::DumpMontageStructure` |
+| `montage.create_from_sequence` | `sequence_path`, `dest_asset_path`, `slot_name`, `first_section_name` | `BlueprintInspectorLibrary::CreateMontageFromSequence` |
+| `montage.add_slot_track` | `asset_path`, `slot_name` | `BlueprintInspectorLibrary::AddMontageSlotTrack` |
+| `montage.set_slot_track_name` | `asset_path`, `track_index`, `slot_name` | `BlueprintInspectorLibrary::SetMontageSlotTrackName` |
+| `montage.set_section_next` | `asset_path`, `section_name`, `next_section_name` | `BlueprintInspectorLibrary::SetMontageSectionNext` |
+
+#### niagara.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `niagara.inspect_function_calls` | `system_asset_path`, `emitter_name` | `BlueprintInspectorLibrary::InspectNiagaraFunctionCalls` |
+| `niagara.inspect_module_graph` | `module_script_path` | `BlueprintInspectorLibrary::InspectNiagaraModuleGraph` |
+| `niagara.script_create` | `asset_path`, `usage` | `BPINiagaraScriptToolset::CreateNiagaraScript` |
+| `niagara.script_set_metadata` | `script_path`, `description`, `category`, `library_visibility`, `module_usage_bitmask`, `keywords` | `BPINiagaraScriptToolset::SetScriptMetadata` |
+| `niagara.script_compile` | `script_path`, `force`, `refresh_referencers` | `BPINiagaraScriptToolset::CompileNiagaraScript` |
+| `niagara.script_dump_graph` | `script_path` | `BPINiagaraScriptToolset::DumpScriptGraph` |
+| `niagara.script_add_input` | `script_path`, `name`, `type_`, `default_value`, `map_get_node_id` | `BPINiagaraScriptToolset::AddScriptInput` |
+| `niagara.script_remove_input` | `script_path`, `name` | `BPINiagaraScriptToolset::RemoveScriptInput` |
+| `niagara.script_set_input_default` | `script_path`, `name`, `default_value` | `BPINiagaraScriptToolset::SetScriptInputDefault` |
+| `niagara.script_add_map_get_pin` | `script_path`, `node_id`, `parameter_name`, `type_` | `BPINiagaraScriptToolset::AddMapGetPin` |
+| `niagara.script_add_map_set_pin` | `script_path`, `node_id`, `parameter_name`, `type_` | `BPINiagaraScriptToolset::AddMapSetPin` |
+| `niagara.script_add_node` | `script_path`, `node_kind`, `arg`, `pos_x`, `pos_y` | `BPINiagaraScriptToolset::AddNode` |
+| `niagara.script_remove_node` | `script_path`, `node_id` | `BPINiagaraScriptToolset::RemoveNode` |
+| `niagara.script_set_custom_hlsl` | `script_path`, `node_id`, `code` | `BPINiagaraScriptToolset::SetCustomHlsl` |
+| `niagara.script_add_custom_hlsl_pin` | `script_path`, `node_id`, `name`, `type_`, `is_output` | `BPINiagaraScriptToolset::AddCustomHlslPin` |
+| `niagara.script_remove_custom_hlsl_pin` | `script_path`, `node_id`, `pin` | `BPINiagaraScriptToolset::RemoveCustomHlslPin` |
+| `niagara.script_connect_pins` | `script_path`, `from_node_id`, `from_pin`, `to_node_id`, `to_pin` | `BPINiagaraScriptToolset::ConnectPins` |
+| `niagara.script_disconnect_pin` | `script_path`, `node_id`, `pin`, `other_node_id`, `other_pin` | `BPINiagaraScriptToolset::DisconnectPin` |
+| `niagara.script_set_pin_default` | `script_path`, `node_id`, `pin`, `value_text` | `BPINiagaraScriptToolset::SetPinDefault` |
+| `niagara.script_create_scratch_pad` | `owner_path`, `name`, `usage`, `target_stack_usage` | `BPINiagaraScriptToolset::CreateScratchPadScript` |
+| `niagara.script_list_scratch_pad` | `owner_path` | `BPINiagaraScriptToolset::ListScratchPadScripts` |
+
+#### skeletalmesh.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `skeletalmesh.dump_skeleton` | `asset_path` | `BlueprintInspectorLibrary::DumpSkeletonStructure` |
+
+#### statetree.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `statetree.list_binding_sources` | `tree_path`, `target_node_id` | `BPIStateTreeToolset::ListStateTreeBindingSources` |
+| `statetree.unbind_property` | `tree_path`, `target_node_id`, `target_property_path` | `BPIStateTreeToolset::UnbindStateTreeProperty` |
+| `statetree.add_parameter` | `tree_path`, `name`, `type_` | `BPIStateTreeToolset::AddStateTreeParameter` |
+
+#### widget.*
+
+| Method | Params | BlueprintInspector function |
+|--------|--------|-----------------------------|
+| `widget.mvvm_set_binding_mode` | `widget_path`, `binding_id`, `mode` | `BPIMVVMToolset::SetBindingMode` |
+| `widget.mvvm_set_binding_execution_mode` | `widget_path`, `binding_id`, `execution_mode` | `BPIMVVMToolset::SetBindingExecutionMode` |
+| `widget.mvvm_set_binding_enabled` | `widget_path`, `binding_id`, `enabled`, `compile` | `BPIMVVMToolset::SetBindingEnabled` |
+| `widget.mvvm_update_binding_paths` | `widget_path`, `binding_id`, `source_path`, `destination_path` | `BPIMVVMToolset::UpdateBindingPaths` |
+| `widget.mvvm_set_conversion_function_argument` | `widget_path`, `binding_id`, `argument_name`, `value_or_path`, `source_to_destination` | `BPIMVVMToolset::SetConversionFunctionArgument` |
+| `widget.mvvm_remove_view_model` | `widget_path`, `view_model_name`, `remove_referencing_bindings` | `BPIMVVMToolset::RemoveViewModelFromWidget` |
+| `widget.mvvm_set_view_model_creation_type` | `widget_path`, `view_model_name`, `creation_type`, `argument` | `BPIMVVMToolset::SetViewModelCreationType` |
+| `widget.mvvm_set_view_model_options` | `widget_path`, `view_model_name`, `expose_instance_in_editor`, `create_setter_function`, `optional` | `BPIMVVMToolset::SetViewModelOptions` |
+| `widget.mvvm_rename_view_model` | `widget_path`, `view_model_name`, `new_name` | `BPIMVVMToolset::RenameViewModel` |
+| `widget.mvvm_remove_view_model_property` | `view_model_path`, `property_name` | `BPIMVVMToolset::RemoveViewModelProperty` |
+| `widget.mvvm_set_view_model_property_default` | `view_model_path`, `property_name`, `value_text` | `BPIMVVMToolset::SetViewModelPropertyDefault` |
+| `widget.mvvm_add_view_event` | `widget_path`, `event_path`, `destination_function_path` | `BPIMVVMToolset::AddViewEvent` |
+| `widget.mvvm_set_view_event_argument` | `widget_path`, `event_id`, `argument_name`, `value_or_path` | `BPIMVVMToolset::SetViewEventArgument` |
+| `widget.mvvm_remove_view_event` | `widget_path`, `event_id` | `BPIMVVMToolset::RemoveViewEvent` |
+| `widget.mvvm_add_view_condition` | `widget_path`, `condition_path`, `operation`, `value`, `max_value`, `destination_function_path` | `BPIMVVMToolset::AddViewCondition` |
+| `widget.mvvm_remove_view_condition` | `widget_path`, `condition_id` | `BPIMVVMToolset::RemoveViewCondition` |
+| `widget.mvvm_dump` | `widget_path` | `BPIMVVMToolset::DumpWidgetMVVM` |
+| `widget.mvvm_compile` | `widget_path` | `BPIMVVMToolset::CompileWidgetMVVM` |

@@ -9,6 +9,7 @@
 #include "IPAddress.h"
 #include "Sockets.h"
 #include "Common/TcpSocketBuilder.h"
+#include "HAL/PlatformProcess.h"
 
 namespace
 {
@@ -86,7 +87,7 @@ bool FMCPServerRunnable::Init()
         return false;
     }
 
-    if (!ListenSocket->Listen(1))
+    if (!ListenSocket->Listen(16))
     {
         UE_LOG(LogMCPBridge, Error, TEXT("MCPServerRunnable: listen failed."));
         SocketSubsystem->DestroySocket(ListenSocket);
@@ -128,61 +129,76 @@ uint32 FMCPServerRunnable::Run()
         UE_LOG(LogMCPBridge, Log, TEXT("MCPServerRunnable: client connected from %s."),
             *ClientAddr->ToString(true));
 
-        // Fresh receive buffer for each new client to avoid cross-session bleed.
-        ReceiveBuffer.Reset();
-
-        // Persistent per-client loop.
-        while (!bStopRequested)
+        // One thread per client, so a client that keeps its connection open (or goes quiet)
+        // never blocks the others. Requests from all clients are still executed one at a time
+        // on the GameThread. RequestStopAndWait waits on ActiveClients before the object dies.
+        ActiveClients.Increment();
+        Async(EAsyncExecution::Thread, [this, ClientSocket]()
         {
-            FString Line;
-            bool bExceededLimit = false;
-
-            if (!ReceiveLine(ClientSocket, Line, bExceededLimit))
-            {
-                if (bExceededLimit)
-                {
-                    // Send error and drop the connection.
-                    MCPProtocol::FMCPResponse ErrResponse = MCPProtocol::MakeError(
-                        nullptr,
-                        MCPProtocol::FMCPError::InvalidRequest,
-                        TEXT("Request line exceeded maximum allowed size"));
-                    SendResponse(ClientSocket, MCPProtocol::SerializeResponse(ErrResponse));
-                }
-                UE_LOG(LogMCPBridge, Log, TEXT("MCPServerRunnable: client disconnected."));
-                break;
-            }
-
-            if (Line.IsEmpty())
-            {
-                continue;
-            }
-
-            MCPProtocol::FMCPRequest Request;
-            MCPProtocol::FMCPError ParseError;
-            if (!MCPProtocol::ParseRequest(Line, Request, ParseError))
-            {
-                if (!Request.IsNotification())
-                {
-                    MCPProtocol::FMCPResponse ErrResponse = MCPProtocol::MakeError(
-                        Request.Id, ParseError.Code, ParseError.Message);
-                    SendResponse(ClientSocket, MCPProtocol::SerializeResponse(ErrResponse));
-                }
-                continue;
-            }
-
-            MCPProtocol::FMCPResponse Response = DispatchToGameThread(Request);
-
-            // Notifications never receive a response.
-            if (!Request.IsNotification())
-            {
-                SendResponse(ClientSocket, MCPProtocol::SerializeResponse(Response));
-            }
-        }
-
-        SocketSubsystem->DestroySocket(ClientSocket);
+            ServeClient(ClientSocket);
+            ActiveClients.Decrement();
+        });
     }
 
     return 0;
+}
+
+void FMCPServerRunnable::ServeClient(FSocket* ClientSocket)
+{
+    // Each client has its own receive buffer to avoid cross-session bleed.
+    TArray<uint8> ReceiveBuffer;
+
+    while (!bStopRequested)
+    {
+        FString Line;
+        bool bExceededLimit = false;
+
+        if (!ReceiveLine(ClientSocket, ReceiveBuffer, Line, bExceededLimit))
+        {
+            if (bExceededLimit)
+            {
+                // Send error and drop the connection.
+                MCPProtocol::FMCPResponse ErrResponse = MCPProtocol::MakeError(
+                    nullptr,
+                    MCPProtocol::FMCPError::InvalidRequest,
+                    TEXT("Request line exceeded maximum allowed size"));
+                SendResponse(ClientSocket, MCPProtocol::SerializeResponse(ErrResponse));
+            }
+            UE_LOG(LogMCPBridge, Log, TEXT("MCPServerRunnable: client disconnected."));
+            break;
+        }
+
+        if (Line.IsEmpty())
+        {
+            continue;
+        }
+
+        MCPProtocol::FMCPRequest Request;
+        MCPProtocol::FMCPError ParseError;
+        if (!MCPProtocol::ParseRequest(Line, Request, ParseError))
+        {
+            if (!Request.IsNotification())
+            {
+                MCPProtocol::FMCPResponse ErrResponse = MCPProtocol::MakeError(
+                    Request.Id, ParseError.Code, ParseError.Message);
+                SendResponse(ClientSocket, MCPProtocol::SerializeResponse(ErrResponse));
+            }
+            continue;
+        }
+
+        MCPProtocol::FMCPResponse Response = DispatchToGameThread(Request);
+
+        // Notifications never receive a response.
+        if (!Request.IsNotification())
+        {
+            SendResponse(ClientSocket, MCPProtocol::SerializeResponse(Response));
+        }
+    }
+
+    if (ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM))
+    {
+        SocketSubsystem->DestroySocket(ClientSocket);
+    }
 }
 
 void FMCPServerRunnable::Stop()
@@ -224,9 +240,14 @@ void FMCPServerRunnable::RequestStopAndWait()
         delete Thread;
         Thread = nullptr;
     }
+    // Client threads poll bStopRequested every ReadPollMillis, so this is short.
+    while (ActiveClients.GetValue() > 0)
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
 }
 
-bool FMCPServerRunnable::ReceiveLine(FSocket* ClientSocket, FString& OutLine, bool& bOutExceededLimit)
+bool FMCPServerRunnable::ReceiveLine(FSocket* ClientSocket, TArray<uint8>& ReceiveBuffer, FString& OutLine, bool& bOutExceededLimit)
 {
     bOutExceededLimit = false;
     const FTimespan PollWindow = FTimespan::FromMilliseconds(ReadPollMillis);

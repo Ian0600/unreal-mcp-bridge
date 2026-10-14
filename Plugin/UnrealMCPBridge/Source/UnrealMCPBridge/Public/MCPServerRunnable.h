@@ -4,6 +4,7 @@
 #include "HAL/Runnable.h"
 #include "HAL/RunnableThread.h"
 #include "HAL/ThreadSafeBool.h"
+#include "HAL/ThreadSafeCounter.h"
 #include "Sockets.h"
 #include "MCPCommandRegistry.h"
 
@@ -37,7 +38,12 @@ public:
 private:
     // Read bytes from ClientSocket into a line buffer until '\n' is found.
     // Returns false when the connection is closed or the line exceeds MaxLineBytes.
-    bool ReceiveLine(FSocket* ClientSocket, FString& OutLine, bool& bOutExceededLimit);
+    // ReceiveBuffer belongs to the calling client, so clients can be served concurrently.
+    bool ReceiveLine(FSocket* ClientSocket, TArray<uint8>& ReceiveBuffer, FString& OutLine, bool& bOutExceededLimit);
+
+    // Serve one accepted client until it disconnects or Stop is requested. Runs on its own
+    // thread and owns (destroys) ClientSocket.
+    void ServeClient(FSocket* ClientSocket);
 
     // Send a serialized response followed by '\n' to ClientSocket.
     bool SendResponse(FSocket* ClientSocket, const FString& Serialized);
@@ -55,6 +61,6 @@ private:
     FRunnableThread* Thread = nullptr;
     FThreadSafeBool bStopRequested;
 
-    // Accumulates bytes received from the current client across multiple ReceiveLine calls.
-    TArray<uint8> ReceiveBuffer;
+    // Number of client threads still running; RequestStopAndWait waits for it to reach zero.
+    FThreadSafeCounter ActiveClients;
 };

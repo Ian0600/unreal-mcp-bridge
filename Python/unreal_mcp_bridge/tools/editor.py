@@ -46,3 +46,12 @@ def register_editor_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         if not script:
             raise ValueError("script is required")
         return conn.call("editor.python_exec", {"script": script, "mode": mode})
+
+    @mcp.tool()
+    def editor_console_exec(command: str) -> dict:
+        """Execute an editor console command (e.g. "stat fps", "obj list class=Blueprint", CVar set/get).
+        command: Console command line.
+        Returns: JSON: {"success":bool,"output":string} with the text the command printed.
+
+        Forwarded to BlueprintInspector (BPIEditorToolset::ExecuteConsoleCommand); requires that plugin to be loaded."""
+        return conn.call("editor.console_exec", {"command": command})

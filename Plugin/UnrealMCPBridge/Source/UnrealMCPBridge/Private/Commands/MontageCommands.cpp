@@ -8,6 +8,7 @@
 #include "Animation/AnimCompositeBase.h"
 #include "Animation/AnimSequenceBase.h"
 #include "Animation/Skeleton.h"
+#include "Commands/InspectorInvoke.h"
 
 namespace
 {
@@ -146,6 +147,14 @@ namespace
 
 void FMontageCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
+    // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
+    Registry.Register(TEXT("montage.dump_structure"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpMontageStructure"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("montage.create_from_sequence"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("CreateMontageFromSequence"), { TEXT("sequence_path"), TEXT("dest_asset_path"), TEXT("slot_name"), TEXT("first_section_name") }));
+    Registry.Register(TEXT("montage.add_slot_track"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("AddMontageSlotTrack"), { TEXT("asset_path"), TEXT("slot_name") }));
+    Registry.Register(TEXT("montage.set_slot_track_name"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetMontageSlotTrackName"), { TEXT("asset_path"), TEXT("track_index"), TEXT("slot_name") }));
+    Registry.Register(TEXT("montage.set_section_next"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetMontageSectionNext"), { TEXT("asset_path"), TEXT("section_name"), TEXT("next_section_name") }));
+    // ---- END forwarded commands ----
+
     // montage.get_info — 몽타주 한 장의 슬롯/세그먼트/섹션 전부. Params: montage_path.
     // Returns { path, skeleton, play_length, blend_in, blend_out,
     //           slots: [ { slot, length, segments: [ { index, animation, start_pos, anim_start, anim_end,

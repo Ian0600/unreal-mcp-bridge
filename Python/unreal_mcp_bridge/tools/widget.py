@@ -732,3 +732,225 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         if parent_widget:
             params["parent_widget"] = parent_widget
         return conn.call("widget.import_text", params)
+
+    @mcp.tool()
+    def widget_mvvm_set_binding_mode(widget_path: str, binding_id: str, mode: str) -> dict:
+        """UMG Viewmodel (MVVM) authoring that the official MVVM toolset lacks: binding mode / execution mode / enabled flags,
+        editing binding paths and conversion-function arguments, viewmodel removal / creation type / options / rename,
+        viewmodel Blueprint property removal and defaults, view events and conditions, and a full JSON dump.
+        Works through UMVVMEditorSubsystem like the MVVM editor panels do.
+        
+        Ids (interoperable with the official MVVM toolset):
+         - BindingId = FMVVMBlueprintViewBinding::BindingId, written "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" (same as
+           ListWidgetViewBindings / CreateViewBinding). Any FGuid text form is accepted.
+         - ViewModelName = the viewmodel property name on the widget (FMVVMBlueprintViewModelContext::ViewModelName). The viewmodel
+           id (GUID) or the viewmodel class name/path (what the official toolset uses) is also accepted when unambiguous.
+         - Event / condition id = the object name of the UMVVMBlueprintViewEvent / UMVVMBlueprintViewCondition (see DumpWidgetMVVM).
+        Path syntax (same contexts as the official CreateViewBinding, written as one string): "<Context>.<Field>[.<Field>...]"
+         where Context is a viewmodel name (or class name), a widget name from the widget tree, or "Self" (the widget blueprint).
+         Fields are properties or functions, e.g. "VM_Player.Health", "Txt_Score.Text", "Self.SetScoreText", "VM_Player.Stats.Level".
+        Literal values use the UE text-import format of the pin type, e.g. "true", "3", "Hello", "(R=1,G=0,B=0,A=1)".
+        Edits are transacted and mark the Blueprint modified like the editor; they do not compile unless stated
+        (use CompileWidgetMVVM). Nothing is saved; save with the official asset tools.
+        /
+        UCLASS(BlueprintType)
+        class BLUEPRINTINSPECTOR_API UBPIMVVMToolset : public UToolsetDefinition
+        {
+        	GENERATED_BODY()
+        
+        public:
+        	virtual FString GetToolsetVersion() const override { return TEXT("1.0"); }
+        
+        	// ---- bindings ----
+        
+        	/**
+        Set the binding mode (direction) of a view binding (UMVVMEditorSubsystem::SetBindingTypeForBinding, like the binding row combo).
+        widget_path: Widget Blueprint asset path, e.g. "/Game/UI/WBP_HUD".
+        binding_id: Binding id (from ListWidgetViewBindings, CreateViewBinding or DumpWidgetMVVM).
+        mode: OneTimeToDestination, OneWayToDestination, TwoWay or OneWayToSource ("ToWidget"/"ToViewModel" aliases accepted).
+        Returns: "OK" or "ERROR|...". Not compiled; the compiler reports unsupported directions (e.g. TwoWay to a read-only field).
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::SetBindingMode); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_set_binding_mode", {"widget_path": widget_path, "binding_id": binding_id, "mode": mode})
+
+    @mcp.tool()
+    def widget_mvvm_set_binding_execution_mode(widget_path: str, binding_id: str, execution_mode: str) -> dict:
+        """Override or reset the execution mode of a view binding.
+        execution_mode: Default (remove the override), Immediate, Delayed, Tick or DelayedWhenSharedElseImmediate (alias "Auto").
+         Modes not in the project's MVVM "Allowed Execution Mode" setting are rejected.
+        Returns: "OK" or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::SetBindingExecutionMode); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_set_binding_execution_mode", {"widget_path": widget_path, "binding_id": binding_id, "execution_mode": execution_mode})
+
+    @mcp.tool()
+    def widget_mvvm_set_binding_enabled(widget_path: str, binding_id: str, enabled: bool, compile: bool) -> dict:
+        """Set the Enabled and Compile flags of a view binding.
+        enabled: Binding enabled by default (instances may still enable it at runtime).
+        compile: False keeps the binding in the editor but excludes it from compilation.
+        Returns: "OK" or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::SetBindingEnabled); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_set_binding_enabled", {"widget_path": widget_path, "binding_id": binding_id, "enabled": enabled, "compile": compile})
+
+    @mcp.tool()
+    def widget_mvvm_update_binding_paths(widget_path: str, binding_id: str, source_path: str, destination_path: str) -> dict:
+        """Change the source and/or destination field of an existing binding (keeps its id, mode and flags).
+        Refuses to replace a side that is driven by a conversion function (edit it with SetConversionFunctionArgument instead).
+        source_path: New source path, e.g. "VM_Player.Health". Empty = unchanged.
+        destination_path: New destination path, e.g. "Bar_Health.Percent". Empty = unchanged.
+        Returns: JSON {"id","source","destination"} (resolved path text) or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::UpdateBindingPaths); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_update_binding_paths", {"widget_path": widget_path, "binding_id": binding_id, "source_path": source_path, "destination_path": destination_path})
+
+    @mcp.tool()
+    def widget_mvvm_set_conversion_function_argument(widget_path: str, binding_id: str, argument_name: str, value_or_path: str, source_to_destination: bool) -> dict:
+        """Set an input of a binding's conversion function to a literal value or bind it to a field path.
+        argument_name: Conversion function parameter name, e.g. "bUseGrouping" (split pins: "Parent.Child"). See DumpWidgetMVVM.
+        value_or_path: "path:<Context>.<Field>" binds the argument to a field ("path:" alone unbinds it);
+         anything else is a literal in pin default-value format (a "value:" prefix is stripped), e.g. "false", "2", "Hello".
+        source_to_destination: True for the source->destination conversion, false for destination->source.
+        Returns: JSON {"argument","value"|"path"} or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::SetConversionFunctionArgument); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_set_conversion_function_argument", {"widget_path": widget_path, "binding_id": binding_id, "argument_name": argument_name, "value_or_path": value_or_path, "source_to_destination": source_to_destination})
+
+    @mcp.tool()
+    def widget_mvvm_remove_view_model(widget_path: str, view_model_name: str, remove_referencing_bindings: bool) -> dict:
+        """Remove a viewmodel from a widget and report the bindings, events and conditions that referenced it.
+        view_model_name: Viewmodel name (or id / class name).
+        remove_referencing_bindings: Also remove those bindings, events and conditions (otherwise they are kept and will fail to compile).
+        Returns: JSON {"removed":name,"referencingBindings":[{"id","text"}],"referencingEvents":[id],"referencingConditions":[id],
+         "referencesRemoved":bool,"usedInGraphs":bool} or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::RemoveViewModelFromWidget); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_remove_view_model", {"widget_path": widget_path, "view_model_name": view_model_name, "remove_referencing_bindings": remove_referencing_bindings})
+
+    @mcp.tool()
+    def widget_mvvm_set_view_model_creation_type(widget_path: str, view_model_name: str, creation_type: str, argument: str) -> dict:
+        """Change how a widget gets its viewmodel instance. Applies the same side effects as the details panel
+        (Manual => setter + optional; Context => optional).
+        creation_type: Manual, CreateInstance, GlobalViewModelCollection, PropertyPath, Resolver or Context
+         (must be allowed for the viewmodel class and by the project settings).
+        argument: GlobalViewModelCollection: global viewmodel identifier (required). PropertyPath: the property/function path
+         evaluated on the widget, e.g. "GetOwningPlayer.MyViewModel" (required). Resolver: resolver class path
+         ("/Script/Module.MyResolver" or a Blueprint path); empty = project default resolver. Ignored for other types.
+        Returns: JSON with the updated viewmodel (same shape as DumpWidgetMVVM "viewModels" entries) or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::SetViewModelCreationType); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_set_view_model_creation_type", {"widget_path": widget_path, "view_model_name": view_model_name, "creation_type": creation_type, "argument": argument})
+
+    @mcp.tool()
+    def widget_mvvm_set_view_model_options(widget_path: str, view_model_name: str, expose_instance_in_editor: bool, create_setter_function: bool, optional: bool) -> dict:
+        """Set the advanced options of a widget viewmodel.
+        expose_instance_in_editor: Expose the instance on every widget instance for editing (only meaningful for CreateInstance).
+        create_setter_function: Generate a public setter (always on for Manual).
+        optional: Do not warn when the instance is missing (always on for Manual and Context).
+        Returns: JSON with the updated viewmodel plus "warnings":[...] or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::SetViewModelOptions); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_set_view_model_options", {"widget_path": widget_path, "view_model_name": view_model_name, "expose_instance_in_editor": expose_instance_in_editor, "create_setter_function": create_setter_function, "optional": optional})
+
+    @mcp.tool()
+    def widget_mvvm_rename_view_model(widget_path: str, view_model_name: str, new_name: str) -> dict:
+        """Rename a widget viewmodel (renames the generated property and updates graph references, like the viewmodel panel).
+        Unloaded Blueprints that reference this widget are loaded first (as the editor does when you answer Yes).
+        Returns: JSON {"oldName","newName","loadedReferencers":[paths]} or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::RenameViewModel); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_rename_view_model", {"widget_path": widget_path, "view_model_name": view_model_name, "new_name": new_name})
+
+    @mcp.tool()
+    def widget_mvvm_remove_view_model_property(view_model_path: str, property_name: str) -> dict:
+        """Remove a member variable (e.g. a FieldNotify property) from a viewmodel Blueprint (a UMVVMViewModelBase subclass).
+        Graph nodes using it are removed with it; widget bindings in other assets that used it fail on their next compile.
+        view_model_path: Viewmodel Blueprint asset path, e.g. "/Game/UI/VM_Player".
+        Returns: JSON {"removed","fieldNotify":bool,"wasUsedInGraphs":bool} or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::RemoveViewModelProperty); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_remove_view_model_property", {"view_model_path": view_model_path, "property_name": property_name})
+
+    @mcp.tool()
+    def widget_mvvm_set_view_model_property_default(view_model_path: str, property_name: str, value_text: str) -> dict:
+        """Set the default value (class default object) of a viewmodel Blueprint variable.
+        If the variable is not on the generated class yet (added but never compiled), the Blueprint is compiled first (not saved).
+        value_text: Value in UE text-import format, e.g. "100", "true", "Hello", "(X=1,Y=2,Z=3)".
+        Returns: JSON {"property","value","compiled":bool} (value read back) or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::SetViewModelPropertyDefault); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_set_view_model_property_default", {"view_model_path": view_model_path, "property_name": property_name, "value_text": value_text})
+
+    @mcp.tool()
+    def widget_mvvm_add_view_event(widget_path: str, event_path: str, destination_function_path: str) -> dict:
+        """Add a view event: when a multicast delegate fires, call a function (requires the MVVM "Allow Binding Event" project setting).
+        event_path: Path to a multicast delegate property, e.g. "Btn_Buy.OnClicked" or "Self.OnVisibilityChanged".
+        destination_function_path: Function to call, e.g. "VM_Shop.Buy" or "Self.HandleClicked". Set its parameters with SetViewEventArgument.
+        Returns: JSON {"id","eventPath","destination","arguments":[...]} or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::AddViewEvent); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_add_view_event", {"widget_path": widget_path, "event_path": event_path, "destination_function_path": destination_function_path})
+
+    @mcp.tool()
+    def widget_mvvm_set_view_event_argument(widget_path: str, event_id: str, argument_name: str, value_or_path: str) -> dict:
+        """Set a parameter of a view event's destination function to a literal or to a field path (same ValueOrPath rules as SetConversionFunctionArgument).
+        event_id: Event id from AddViewEvent / DumpWidgetMVVM.
+        Returns: JSON {"argument","value"|"path"} or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::SetViewEventArgument); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_set_view_event_argument", {"widget_path": widget_path, "event_id": event_id, "argument_name": argument_name, "value_or_path": value_or_path})
+
+    @mcp.tool()
+    def widget_mvvm_remove_view_event(widget_path: str, event_id: str) -> dict:
+        """Remove a view event.
+        Returns: "OK" or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::RemoveViewEvent); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_remove_view_event", {"widget_path": widget_path, "event_id": event_id})
+
+    @mcp.tool()
+    def widget_mvvm_add_view_condition(widget_path: str, condition_path: str, operation: str, value: float, max_value: float, destination_function_path: str) -> dict:
+        """Add a view condition: when a numeric field satisfies a comparison, call a function
+        (requires the MVVM "Allow Condition Binding" project setting).
+        condition_path: Source field, e.g. "VM_Player.Health".
+        operation: Equal, NotEqual, MoreThan, MoreThanOrEqual, LessThan, LessThanOrEqual, BetweenInclusive or BetweenExclusive.
+        value: Comparison value (lower bound for Between*).
+        max_value: Upper bound for Between* (ignored otherwise).
+        destination_function_path: Function to call, e.g. "Self.PlayLowHealthAnim".
+        Returns: JSON {"id","conditionPath","operation","value","maxValue","destination"} or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::AddViewCondition); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_add_view_condition", {"widget_path": widget_path, "condition_path": condition_path, "operation": operation, "value": value, "max_value": max_value, "destination_function_path": destination_function_path})
+
+    @mcp.tool()
+    def widget_mvvm_remove_view_condition(widget_path: str, condition_id: str) -> dict:
+        """Remove a view condition.
+        Returns: "OK" or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::RemoveViewCondition); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_remove_view_condition", {"widget_path": widget_path, "condition_id": condition_id})
+
+    @mcp.tool()
+    def widget_mvvm_dump(widget_path: str) -> dict:
+        """Dump the widget's MVVM view with ids usable by these tools and by the official MVVM toolset.
+        Returns: JSON {"widget","status","hasView","settings":{...},
+         "viewModels":[{"name","id","class","creationType","globalViewModelIdentifier","propertyPath","resolver","instanced",
+           "exposeInstanceInEditor","createSetterFunction","createGetterFunction","optional","canRename","canEdit","canRemove","allowedCreationTypes":[...]}],
+         "bindings":[{"id","text","source":path,"destination":path,"mode","executionMode","enabled","compile",
+           "conversion":{"sourceToDestination":conv?,"destinationToSource":conv?},"messages":[{"severity","text"}]}],
+         "events":[{"id","eventPath":path,"destination":path,"enabled","compile","arguments":[pin],"messages":[...]}],
+         "conditions":[{"id","conditionPath":path,"operation","value","maxValue","destination":path,"enabled","compile","arguments":[pin],"messages":[...]}]}
+         where path = {"valid","spec","text","source","widget"?,"viewModelId"?,"viewModelName"?,"fields":[...]} ("spec" is re-usable as a path argument),
+         conv = {"function","type","valid","wrapperGraph","arguments":[pin]} and pin = {"name","id","value","path"?,"split","orphaned","linked"?}.
+         Messages come from the last compile in this editor session (see CompileWidgetMVVM). Or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::DumpWidgetMVVM); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_dump", {"widget_path": widget_path})
+
+    @mcp.tool()
+    def widget_mvvm_compile(widget_path: str) -> dict:
+        """Compile the Widget Blueprint (never saves) and return compiler and per-binding MVVM messages.
+        Returns: JSON {"status","errors","warnings","messages":[{"severity","text"}],"bindingMessages":[{"id","kind","severity","text"}]} or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIMVVMToolset::CompileWidgetMVVM); requires that plugin to be loaded."""
+        return conn.call("widget.mvvm_compile", {"widget_path": widget_path})

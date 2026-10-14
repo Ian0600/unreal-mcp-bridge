@@ -183,3 +183,40 @@ def register_montage_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         if index is not None:
             params["index"] = index
         return conn.call("montage.remove_section", params)
+
+    @mcp.tool()
+    def montage_dump_structure(asset_path: str) -> dict:
+        """몽타주 구조 덤프: 섹션/슬롯트랙/세그먼트/블렌드/SyncGroup. 몽타주가 아니면 빈 값.
+
+        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpMontageStructure); requires that plugin to be loaded."""
+        return conn.call("montage.dump_structure", {"asset_path": asset_path})
+
+    @mcp.tool()
+    def montage_create_from_sequence(sequence_path: str, dest_asset_path: str, slot_name: str, first_section_name: str) -> dict:
+        """시퀀스 1개로 몽타주 에셋 생성 (슬롯트랙 1개 + 전체 구간 세그먼트 + 시작 섹션).
+        DestAssetPath 가 이미 존재하면 실패. SlotName 빈 = "DefaultSlot", FirstSectionName 빈 = "Default".
+        Returns: 생성된 몽타주 asset path (실패 시 빈 문자열)
+
+        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::CreateMontageFromSequence); requires that plugin to be loaded."""
+        return conn.call("montage.create_from_sequence", {"sequence_path": sequence_path, "dest_asset_path": dest_asset_path, "slot_name": slot_name, "first_section_name": first_section_name})
+
+    @mcp.tool()
+    def montage_add_slot_track(asset_path: str, slot_name: str) -> dict:
+        """슬롯트랙 추가. Returns: 새 트랙 인덱스 (-1 실패)
+
+        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::AddMontageSlotTrack); requires that plugin to be loaded."""
+        return conn.call("montage.add_slot_track", {"asset_path": asset_path, "slot_name": slot_name})
+
+    @mcp.tool()
+    def montage_set_slot_track_name(asset_path: str, track_index: int, slot_name: str) -> dict:
+        """SetMontageSlotTrackName
+
+        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::SetMontageSlotTrackName); requires that plugin to be loaded."""
+        return conn.call("montage.set_slot_track_name", {"asset_path": asset_path, "track_index": track_index, "slot_name": slot_name})
+
+    @mcp.tool()
+    def montage_set_section_next(asset_path: str, section_name: str, next_section_name: str) -> dict:
+        """섹션 링크 체인 설정. NextSectionName == 자기 자신 = 루프, 빈 문자열 = 체인 끊기.
+
+        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::SetMontageSectionNext); requires that plugin to be loaded."""
+        return conn.call("montage.set_section_next", {"asset_path": asset_path, "section_name": section_name, "next_section_name": next_section_name})

@@ -256,3 +256,30 @@ def register_statetree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         if not tree_path:
             raise ValueError("tree_path is required")
         return conn.call("statetree.compile", {"tree_path": tree_path})
+
+    @mcp.tool()
+    def statetree_list_binding_sources(tree_path: str, target_node_id: str) -> dict:
+        """List the structs a node (task/condition/evaluator) can bind its properties to: schema context data (e.g. Actor),
+        root parameters, state parameters and outputs of other nodes visible from the target, with their top-level properties.
+        target_node_id: Id of the node whose property will be bound (from DumpStateTree).
+        Returns: JSON [{"id":structId,"name","struct","properties":[{"name","type"}]}] or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIStateTreeToolset::ListStateTreeBindingSources); requires that plugin to be loaded."""
+        return conn.call("statetree.list_binding_sources", {"tree_path": tree_path, "target_node_id": target_node_id})
+
+    @mcp.tool()
+    def statetree_unbind_property(tree_path: str, target_node_id: str, target_property_path: str) -> dict:
+        """Remove the binding(s) of a node property.
+        Returns: "OK" or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIStateTreeToolset::UnbindStateTreeProperty); requires that plugin to be loaded."""
+        return conn.call("statetree.unbind_property", {"tree_path": tree_path, "target_node_id": target_node_id, "target_property_path": target_property_path})
+
+    @mcp.tool()
+    def statetree_add_parameter(tree_path: str, name: str, type_: str) -> dict:
+        """Add a root parameter to the StateTree (bindable by every node; set per instance by the StateTree component).
+        type: bool, int, int64, float, double, name, string, text, enum:<EnumPath>, struct:<StructPath>, object:<ClassPath>, class:<ClassPath>.
+        Returns: The root parameters struct id (use as SourceStructId) or "ERROR|...".
+
+        Forwarded to BlueprintInspector (BPIStateTreeToolset::AddStateTreeParameter); requires that plugin to be loaded."""
+        return conn.call("statetree.add_parameter", {"tree_path": tree_path, "name": name, "type": type_})

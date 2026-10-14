@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     connect_timeout: float = 5.0
     # Per-request response timeout in seconds.
     request_timeout: float = 30.0
+    # False (default): open a short-lived connection per call and close it right after the
+    # reply, so nothing holds the UE listener and several clients/calls can run at once.
+    # True: keep one connection open and reuse it (UMCP_PERSISTENT=true).
+    persistent: bool = False
     # Maximum accepted JSON line length in bytes (must match UE plugin setting).
     max_line_bytes: int = 16777216
 

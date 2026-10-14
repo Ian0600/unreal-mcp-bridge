@@ -16,6 +16,8 @@ from .levelio import register_levelio_tools
 from .skeletalmesh import register_skeletalmesh_tools
 from .widget import register_widget_tools
 from .widgetanim import register_widgetanim_tools
+from .behaviortree import register_behaviortree_tools
+from .blendspace import register_blendspace_tools
 
 __all__ = [
     "register_editor_tools",
@@ -36,4 +38,6 @@ __all__ = [
     "register_skeletalmesh_tools",
     "register_widget_tools",
     "register_widgetanim_tools",
+    "register_behaviortree_tools",
+    "register_blendspace_tools",
 ]

@@ -10,6 +10,7 @@
 #include "Engine/SkeletalMeshSocket.h"
 #include "Engine/StaticMesh.h"
 #include "ReferenceSkeleton.h"
+#include "Commands/InspectorInvoke.h"
 
 namespace
 {
@@ -115,6 +116,10 @@ namespace
 
 void FSkeletalMeshCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
+    // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
+    Registry.Register(TEXT("skeletalmesh.dump_skeleton"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpSkeletonStructure"), { TEXT("asset_path") }));
+    // ---- END forwarded commands ----
+
     // skeletalmesh.list_sockets — every socket the mesh answers with, its own and its skeleton's.
     // Params: mesh_path. Returns { mesh_sockets: [...], skeleton_sockets: [...] }.
     //

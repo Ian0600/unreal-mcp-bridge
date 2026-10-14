@@ -12,6 +12,7 @@
 #include "StateTreeEditingSubsystem.h"
 #include "StateTreeTypes.h"
 #include "PropertyBindingPath.h"
+#include "Commands/InspectorInvoke.h"
 
 namespace
 {
@@ -140,6 +141,12 @@ namespace
 
 void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
+    // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
+    Registry.Register(TEXT("statetree.list_binding_sources"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIStateTreeToolset"), TEXT("ListStateTreeBindingSources"), { TEXT("tree_path"), TEXT("target_node_id") }));
+    Registry.Register(TEXT("statetree.unbind_property"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIStateTreeToolset"), TEXT("UnbindStateTreeProperty"), { TEXT("tree_path"), TEXT("target_node_id"), TEXT("target_property_path") }));
+    Registry.Register(TEXT("statetree.add_parameter"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIStateTreeToolset"), TEXT("AddStateTreeParameter"), { TEXT("tree_path"), TEXT("name"), TEXT("type") }));
+    // ---- END forwarded commands ----
+
     // statetree.add_state — adds a state. Params: tree_path, state_name, parent_state_id (optional; empty=root).
     // Returns { state_id }.
     Registry.Register(TEXT("statetree.add_state"),

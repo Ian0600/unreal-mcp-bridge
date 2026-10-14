@@ -20,30 +20,32 @@ MCP Client (Claude, etc.)
 
 ## What It Covers
 
-176 editor methods, each exposed as exactly one MCP tool. The point of most of them is not
+308 editor methods, each exposed as exactly one MCP tool. The point of most of them is not
 convenience — it is that the equivalent edit is either unreachable from Unreal's Python API or
 quietly wrong when done there, because the Python route bypasses the editor utilities that keep
 an asset's parallel structures in agreement.
 
 | Domain            | Methods | What it authors                                                              |
 |-------------------|---------|------------------------------------------------------------------------------|
-| `widget.*`        | 52      | Widget Blueprints: tree, slots, property bindings, UI components, UMG animation |
-| `material.*`      | 42      | Material and material-function graphs, instances, comments, named reroutes    |
-| `niagara.*`       | 16      | Niagara systems: emitters, modules, module inputs, renderers                   |
-| `statetree.*`     | 12      | StateTree states, tasks, conditions, evaluators, transitions, bindings         |
-| `animgraph.*`     | 10      | AnimBlueprint graphs: state machines, states, transitions, players, slots      |
-| `asset.*`         | 7       | Asset listing and metadata, saving, FBX import/export, Content Browser selection |
-| `montage.*`       | 6       | AnimMontage segments and sections                                              |
-| `blueprint.*`     | 5       | Blueprint assets, variables, function graphs                                   |
-| `animnotify.*`    | 5       | Anim notifies and notify states: place, retime, reconfigure, remove            |
-| `editor.*`        | 4       | Editor status, actor listing and spawning, Python exec                         |
+| `widget.*`        | 70      | Widget Blueprints: tree, slots, property bindings, UI components, UMG animation |
+| `material.*`      | 53      | Material and material-function graphs, instances, comments, named reroutes    |
+| `niagara.*`       | 37      | Niagara systems: emitters, modules, module inputs, renderers                   |
+| `statetree.*`     | 15      | StateTree states, tasks, conditions, evaluators, transitions, bindings         |
+| `animgraph.*`     | 24      | AnimBlueprint graphs: state machines, states, transitions, players, slots      |
+| `asset.*`         | 8       | Asset listing and metadata, saving, FBX import/export, Content Browser selection |
+| `montage.*`       | 11      | AnimMontage segments and sections                                              |
+| `blueprint.*`     | 36      | Blueprint assets, variables, function graphs                                   |
+| `animnotify.*`    | 7       | Anim notifies and notify states: place, retime, reconfigure, remove            |
+| `editor.*`        | 5       | Editor status, actor listing and spawning, Python exec                         |
 | `camvar.*`        | 4       | Camera variable collections                                                    |
-| `skeletalmesh.*`  | 3       | Attachment sockets on a mesh or its skeleton, with preview assets              |
+| `skeletalmesh.*`  | 4       | Attachment sockets on a mesh or its skeleton, with preview assets              |
 | `camerarig.*`     | 8       | Camera rig assets: node tree, wiring, node add/remove, exposed parameter defaults |
 | `level.*`         | 3       | Level FBX export, placing assets in the level, the level selection             |
 | `pie.*`           | 2       | Play-In-Editor start/stop                                                      |
 | `compile.*`       | 2       | Live Coding trigger and status                                                 |
 | `object.*`        | 3       | Any UObject's properties by reflection - the escape hatch for what no domain handler covers |
+| `behaviortree.*`  | 9       | Behavior Trees and Blackboards: create, nodes, aux nodes, properties, keys (forwarded to BlueprintInspector) |
+| `blendspace.*`    | 7       | BlendSpace samples and axes, with the resample step the Python route skips (forwarded to BlueprintInspector) |
 
 A few examples of the difference this makes:
 
@@ -65,6 +67,12 @@ A few examples of the difference this makes:
 - **UMG animation bindings.** A movie scene possessable GUID is meaningless to UMG on its own —
   the parallel `FWidgetAnimationBinding` array is what maps it back to a widget, and both halves
   have to be written together or the animation plays over nothing.
+
+### Commands forwarded to BlueprintInspector
+
+124 of those methods are thin forwards to the **BlueprintInspector** plugin's functions (Blueprint graph editing, AnimBP / BlendSpace / Montage authoring, Behavior Trees, MVVM, Niagara script graphs, material contracts and MPC migration). They are added to the domain they belong to (`blueprint.*`, `animgraph.*`, `niagara.*`, ...), plus the new `behaviortree.*` and `blendspace.*`.
+
+BlueprintInspector is optional. The bridge reaches it through UObject reflection, so there is no build or load dependency; until the plugin is loaded those methods answer with an `InternalError` saying so, and everything else works unchanged. The transport is not involved — these are ordinary registry commands, one MCP tool each.
 
 See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the method catalogue. Each method's full parameter
 list lives in the docstring of its `@mcp.tool()` wrapper under `Python/unreal_mcp_bridge/tools/`,
@@ -112,15 +120,17 @@ Port=30100
 +AdditionalPorts=30101
 ```
 
-### One client per port
+### Several clients at once
 
-A listener accepts one connection and then sits in a blocking per-client loop until that
-client disconnects, so a second client pointed at the same port gets *connection refused* —
-it is not queued. Two MCP clients against one editor (Claude Code and Codex, say) therefore
-need two ports: leave one on `Port` and add the other to `AdditionalPorts`. The plugin starts
-one listener thread per port and they share a single command registry, which is safe because
-every handler is dispatched onto the GameThread regardless of which listener received it.
-Duplicate and non-positive entries are ignored.
+A listener serves every connection on its own thread, so any number of MCP clients (Claude
+Code and Codex, say) can use the same port at the same time. Requests from all clients still
+run one at a time on the GameThread. The Python server does not hold a connection open: each
+tool call connects, sends its request, reads the reply and disconnects, so an idle server
+occupies nothing. Set `UMCP_PERSISTENT=true` to go back to one reused connection.
+
+`AdditionalPorts` still starts extra listener threads on other ports, sharing the same command
+registry; it is no longer needed for multiple clients. Duplicate and non-positive entries are
+ignored.
 
 ## Python Package Installation
 
@@ -145,6 +155,7 @@ All settings are prefixed `UMCP_` and can be placed in a `.env` file next to the
 | `UMCP_CONNECT_TIMEOUT` | `5.0`          | TCP connect timeout (seconds)        |
 | `UMCP_REQUEST_TIMEOUT` | `30.0`         | Per-request response timeout (sec)   |
 | `UMCP_MAX_LINE_BYTES`  | `16777216`     | Maximum JSON line size in bytes      |
+| `UMCP_PERSISTENT`      | `false`        | Keep one connection open instead of connecting per call |
 
 Example `.env`:
 ```

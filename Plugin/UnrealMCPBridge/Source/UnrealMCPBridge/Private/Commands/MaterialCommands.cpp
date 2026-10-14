@@ -32,6 +32,7 @@
 #include "GraphEditor.h"
 #include "SGraphPanel.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Commands/InspectorInvoke.h"
 
 // Bring FMCPError into scope for both the anonymous-namespace helpers below and the
 // command lambdas in RegisterCommands (which reference FMCPError unqualified).
@@ -424,6 +425,20 @@ namespace
 
 void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
+    // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
+    Registry.Register(TEXT("material.dump_property_connections"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpMaterialPropertyConnections"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("material.find_using_collection"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("FindMaterialsUsingCollection"), { TEXT("collection_path") }));
+    Registry.Register(TEXT("material.set_root_node_position"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetMaterialRootNodePosition"), { TEXT("asset_path"), TEXT("pos_x"), TEXT("pos_y") }));
+    Registry.Register(TEXT("material.set_custom_data_constant"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetMaterialCustomDataConstant"), { TEXT("asset_path"), TEXT("custom_data_index"), TEXT("value") }));
+    Registry.Register(TEXT("material.get_custom_data_info"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("GetMaterialCustomDataInfo"), { TEXT("asset_path"), TEXT("custom_data_index") }));
+    Registry.Register(TEXT("material.dump_function_contract"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpMaterialFunctionContractJson"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("material.dump_function_caller_contract"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpMaterialFunctionCallerContractJson"), { TEXT("caller_path"), TEXT("function_paths") }));
+    Registry.Register(TEXT("material.dump_mpc_contract"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpMPCContractJson"), { TEXT("collection_path") }));
+    Registry.Register(TEXT("material.dump_mpc_bindings"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpMaterialMPCBindingsJson"), { TEXT("asset_path"), TEXT("collection_path") }));
+    Registry.Register(TEXT("material.merge_parameter_collection_checked"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("MergeMaterialParameterCollectionAdditiveChecked"), { TEXT("target_path"), TEXT("source_path"), TEXT("expected_target_contract_json") }));
+    Registry.Register(TEXT("material.reconnect_function_call_checked"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("ReconnectMaterialFunctionCallChecked"), { TEXT("caller_path"), TEXT("node_id"), TEXT("expected_function_path"), TEXT("expected_function_contract_json"), TEXT("reconnect_spec_json") }));
+    // ---- END forwarded commands ----
+
     // =====================================================================================
     // CREATION
     // =====================================================================================
