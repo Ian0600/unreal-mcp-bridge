@@ -770,7 +770,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         mode: OneTimeToDestination, OneWayToDestination, TwoWay or OneWayToSource ("ToWidget"/"ToViewModel" aliases accepted).
         Returns: "OK" or "ERROR|...". Not compiled; the compiler reports unsupported directions (e.g. TwoWay to a read-only field).
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::SetBindingMode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::SetBindingMode; no other plugin needed."""
         return conn.call("widget.mvvm_set_binding_mode", {"widget_path": widget_path, "binding_id": binding_id, "mode": mode})
 
     @mcp.tool()
@@ -780,7 +780,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
          Modes not in the project's MVVM "Allowed Execution Mode" setting are rejected.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::SetBindingExecutionMode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::SetBindingExecutionMode; no other plugin needed."""
         return conn.call("widget.mvvm_set_binding_execution_mode", {"widget_path": widget_path, "binding_id": binding_id, "execution_mode": execution_mode})
 
     @mcp.tool()
@@ -790,7 +790,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         compile: False keeps the binding in the editor but excludes it from compilation.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::SetBindingEnabled); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::SetBindingEnabled; no other plugin needed."""
         return conn.call("widget.mvvm_set_binding_enabled", {"widget_path": widget_path, "binding_id": binding_id, "enabled": enabled, "compile": compile})
 
     @mcp.tool()
@@ -801,7 +801,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         destination_path: New destination path, e.g. "Bar_Health.Percent". Empty = unchanged.
         Returns: JSON {"id","source","destination"} (resolved path text) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::UpdateBindingPaths); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::UpdateBindingPaths; no other plugin needed."""
         return conn.call("widget.mvvm_update_binding_paths", {"widget_path": widget_path, "binding_id": binding_id, "source_path": source_path, "destination_path": destination_path})
 
     @mcp.tool()
@@ -813,7 +813,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         source_to_destination: True for the source->destination conversion, false for destination->source.
         Returns: JSON {"argument","value"|"path"} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::SetConversionFunctionArgument); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::SetConversionFunctionArgument; no other plugin needed."""
         return conn.call("widget.mvvm_set_conversion_function_argument", {"widget_path": widget_path, "binding_id": binding_id, "argument_name": argument_name, "value_or_path": value_or_path, "source_to_destination": source_to_destination})
 
     @mcp.tool()
@@ -824,7 +824,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         Returns: JSON {"removed":name,"referencingBindings":[{"id","text"}],"referencingEvents":[id],"referencingConditions":[id],
          "referencesRemoved":bool,"usedInGraphs":bool} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::RemoveViewModelFromWidget); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::RemoveViewModelFromWidget; no other plugin needed."""
         return conn.call("widget.mvvm_remove_view_model", {"widget_path": widget_path, "view_model_name": view_model_name, "remove_referencing_bindings": remove_referencing_bindings})
 
     @mcp.tool()
@@ -838,7 +838,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
          ("/Script/Module.MyResolver" or a Blueprint path); empty = project default resolver. Ignored for other types.
         Returns: JSON with the updated viewmodel (same shape as DumpWidgetMVVM "viewModels" entries) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::SetViewModelCreationType); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::SetViewModelCreationType; no other plugin needed."""
         return conn.call("widget.mvvm_set_view_model_creation_type", {"widget_path": widget_path, "view_model_name": view_model_name, "creation_type": creation_type, "argument": argument})
 
     @mcp.tool()
@@ -849,7 +849,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         optional: Do not warn when the instance is missing (always on for Manual and Context).
         Returns: JSON with the updated viewmodel plus "warnings":[...] or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::SetViewModelOptions); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::SetViewModelOptions; no other plugin needed."""
         return conn.call("widget.mvvm_set_view_model_options", {"widget_path": widget_path, "view_model_name": view_model_name, "expose_instance_in_editor": expose_instance_in_editor, "create_setter_function": create_setter_function, "optional": optional})
 
     @mcp.tool()
@@ -858,7 +858,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         Unloaded Blueprints that reference this widget are loaded first (as the editor does when you answer Yes).
         Returns: JSON {"oldName","newName","loadedReferencers":[paths]} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::RenameViewModel); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::RenameViewModel; no other plugin needed."""
         return conn.call("widget.mvvm_rename_view_model", {"widget_path": widget_path, "view_model_name": view_model_name, "new_name": new_name})
 
     @mcp.tool()
@@ -868,7 +868,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         view_model_path: Viewmodel Blueprint asset path, e.g. "/Game/UI/VM_Player".
         Returns: JSON {"removed","fieldNotify":bool,"wasUsedInGraphs":bool} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::RemoveViewModelProperty); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::RemoveViewModelProperty; no other plugin needed."""
         return conn.call("widget.mvvm_remove_view_model_property", {"view_model_path": view_model_path, "property_name": property_name})
 
     @mcp.tool()
@@ -878,7 +878,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         value_text: Value in UE text-import format, e.g. "100", "true", "Hello", "(X=1,Y=2,Z=3)".
         Returns: JSON {"property","value","compiled":bool} (value read back) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::SetViewModelPropertyDefault); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::SetViewModelPropertyDefault; no other plugin needed."""
         return conn.call("widget.mvvm_set_view_model_property_default", {"view_model_path": view_model_path, "property_name": property_name, "value_text": value_text})
 
     @mcp.tool()
@@ -888,7 +888,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         destination_function_path: Function to call, e.g. "VM_Shop.Buy" or "Self.HandleClicked". Set its parameters with SetViewEventArgument.
         Returns: JSON {"id","eventPath","destination","arguments":[...]} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::AddViewEvent); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::AddViewEvent; no other plugin needed."""
         return conn.call("widget.mvvm_add_view_event", {"widget_path": widget_path, "event_path": event_path, "destination_function_path": destination_function_path})
 
     @mcp.tool()
@@ -897,7 +897,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         event_id: Event id from AddViewEvent / DumpWidgetMVVM.
         Returns: JSON {"argument","value"|"path"} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::SetViewEventArgument); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::SetViewEventArgument; no other plugin needed."""
         return conn.call("widget.mvvm_set_view_event_argument", {"widget_path": widget_path, "event_id": event_id, "argument_name": argument_name, "value_or_path": value_or_path})
 
     @mcp.tool()
@@ -905,7 +905,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """Remove a view event.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::RemoveViewEvent); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::RemoveViewEvent; no other plugin needed."""
         return conn.call("widget.mvvm_remove_view_event", {"widget_path": widget_path, "event_id": event_id})
 
     @mcp.tool()
@@ -919,7 +919,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         destination_function_path: Function to call, e.g. "Self.PlayLowHealthAnim".
         Returns: JSON {"id","conditionPath","operation","value","maxValue","destination"} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::AddViewCondition); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::AddViewCondition; no other plugin needed."""
         return conn.call("widget.mvvm_add_view_condition", {"widget_path": widget_path, "condition_path": condition_path, "operation": operation, "value": value, "max_value": max_value, "destination_function_path": destination_function_path})
 
     @mcp.tool()
@@ -927,7 +927,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """Remove a view condition.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::RemoveViewCondition); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::RemoveViewCondition; no other plugin needed."""
         return conn.call("widget.mvvm_remove_view_condition", {"widget_path": widget_path, "condition_id": condition_id})
 
     @mcp.tool()
@@ -944,7 +944,7 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
          conv = {"function","type","valid","wrapperGraph","arguments":[pin]} and pin = {"name","id","value","path"?,"split","orphaned","linked"?}.
          Messages come from the last compile in this editor session (see CompileWidgetMVVM). Or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::DumpWidgetMVVM); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::DumpWidgetMVVM; no other plugin needed."""
         return conn.call("widget.mvvm_dump", {"widget_path": widget_path})
 
     @mcp.tool()
@@ -952,5 +952,5 @@ def register_widget_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """Compile the Widget Blueprint (never saves) and return compiler and per-binding MVVM messages.
         Returns: JSON {"status","errors","warnings","messages":[{"severity","text"}],"bindingMessages":[{"id","kind","severity","text"}]} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIMVVMToolset::CompileWidgetMVVM); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIMVVMToolset::CompileWidgetMVVM; no other plugin needed."""
         return conn.call("widget.mvvm_compile", {"widget_path": widget_path})

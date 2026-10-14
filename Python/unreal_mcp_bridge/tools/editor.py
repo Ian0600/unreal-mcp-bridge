@@ -53,5 +53,5 @@ def register_editor_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         command: Console command line.
         Returns: JSON: {"success":bool,"output":string} with the text the command printed.
 
-        Forwarded to BlueprintInspector (BPIEditorToolset::ExecuteConsoleCommand); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIEditorToolset::ExecuteConsoleCommand; no other plugin needed."""
         return conn.call("editor.console_exec", {"command": command})

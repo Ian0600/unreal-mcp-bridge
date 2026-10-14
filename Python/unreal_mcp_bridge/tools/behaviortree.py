@@ -33,7 +33,7 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         parent_blackboard_path: Optional parent Blackboard asset path (keys are inherited). Empty = none.
         Returns: Object path of the created Blackboard, or an "ERROR|..." string.
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::CreateBlackboard); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::CreateBlackboard; no other plugin needed."""
         return conn.call("behaviortree.create_blackboard", {"asset_path": asset_path, "parent_blackboard_path": parent_blackboard_path})
 
     @mcp.tool()
@@ -46,7 +46,7 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         instance_synced: If true the key value is shared by all instances of this Blackboard.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::AddBlackboardKey); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::AddBlackboardKey; no other plugin needed."""
         return conn.call("behaviortree.add_blackboard_key", {"blackboard_path": blackboard_path, "key_name": key_name, "key_type": key_type, "base_class_or_enum_path": base_class_or_enum_path, "instance_synced": instance_synced})
 
     @mcp.tool()
@@ -55,7 +55,7 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         Nodes that referenced the key keep the name and become invalid until re-bound.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::RemoveBlackboardKey); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::RemoveBlackboardKey; no other plugin needed."""
         return conn.call("behaviortree.remove_blackboard_key", {"blackboard_path": blackboard_path, "key_name": key_name})
 
     @mcp.tool()
@@ -65,7 +65,7 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         blackboard_path: Blackboard asset path to use. Empty = none.
         Returns: JSON {"path":..., "rootId":...} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::CreateBehaviorTree); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::CreateBehaviorTree; no other plugin needed."""
         return conn.call("behaviortree.create", {"asset_path": asset_path, "blackboard_path": blackboard_path})
 
     @mcp.tool()
@@ -80,7 +80,7 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         child_index: Insert position among the parent's children (-1 = append).
         Returns: The new node id (GUID string) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::AddBTNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::AddBTNode; no other plugin needed."""
         return conn.call("behaviortree.add_node", {"tree_path": tree_path, "parent_node_id": parent_node_id, "node_class": node_class, "child_index": child_index})
 
     @mcp.tool()
@@ -92,7 +92,7 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         aux_class: Decorator or service class (path, short name e.g. "BTDecorator_Blackboard", or Blueprint asset path).
         Returns: The new aux node id (GUID string) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::AddBTAuxNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::AddBTAuxNode; no other plugin needed."""
         return conn.call("behaviortree.add_aux_node", {"tree_path": tree_path, "node_id": node_id, "aux_class": aux_class})
 
     @mcp.tool()
@@ -107,7 +107,7 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         value_text: Value in UE text-import format, e.g. "5.0", "true", "(X=1,Y=2,Z=3)", "/Game/Path.Asset".
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::SetBTNodeProperty); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::SetBTNodeProperty; no other plugin needed."""
         return conn.call("behaviortree.set_node_property", {"tree_path": tree_path, "node_id": node_id, "property_path": property_path, "value_text": value_text})
 
     @mcp.tool()
@@ -116,7 +116,7 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         For a decorator/service only that aux node is removed. The ROOT node cannot be removed.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::RemoveBTNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::RemoveBTNode; no other plugin needed."""
         return conn.call("behaviortree.remove_node", {"tree_path": tree_path, "node_id": node_id})
 
     @mcp.tool()
@@ -126,5 +126,5 @@ def register_behaviortree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
          {"id","kind","class","name","description","executionIndex","keys":{prop:keyName},"decorators":[aux],"services":[aux],"children":[node]}
          or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIBehaviorTreeToolset::DumpBehaviorTree); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIBehaviorTreeToolset::DumpBehaviorTree; no other plugin needed."""
         return conn.call("behaviortree.dump", {"tree_path": tree_path})

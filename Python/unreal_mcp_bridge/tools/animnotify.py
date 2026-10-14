@@ -134,7 +134,7 @@ def register_animnotify_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         엔진 Python 미노출 필드(TriggerTime/Duration/TrackIndex) + 인스턴스 노티파이의
         EditAnywhere 프로퍼티를 key=value 로 직렬화 (커스텀 노티파이 클래스 대응).
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpNotifyDetails); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpNotifyDetails; no other plugin needed."""
         return conn.call("animnotify.dump_details", {"asset_path": asset_path})
 
     @mcp.tool()
@@ -143,5 +143,5 @@ def register_animnotify_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         (GetAnimationNotifyEvents 는 복사본을 반환해 Python 으로는 수정 불가한 갭)
         NewDuration < 0 = 듀레이션 유지. NotifyState 가 아니면 듀레이션 무시.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::SetNotifyEventTiming); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::SetNotifyEventTiming; no other plugin needed."""
         return conn.call("animnotify.set_event_timing", {"asset_path": asset_path, "notify_index": notify_index, "new_trigger_time": new_trigger_time, "new_duration": new_duration})

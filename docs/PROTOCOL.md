@@ -465,9 +465,9 @@ Error code `-32010` is returned when the LiveCoding module is not loaded or cann
 { "queued": true }
 ```
 
-### Commands forwarded to BlueprintInspector
+### Commands backed by BlueprintInspector functions
 
-These methods call a function of the BlueprintInspector plugin in-process (UObject reflection; no module dependency, no extra port). If the plugin is not loaded they fail with `InternalError` (-32603). Params are the function's parameters in snake_case; the result is `{"value": ...}` where `value` is the function's return value (a JSON string return is parsed when it holds an object or array). `FVector` parameters are `[x, y, z]`.
+These methods run a function that originates in BlueprintInspector and is compiled into this plugin (UObject reflection onto the built-in `MCPInspector*` classes; no other plugin, no extra port). Params are the function's parameters in snake_case; the result is `{"value": ...}` where `value` is the function's return value (a JSON string return is parsed when it holds an object or array). `FVector` parameters are `[x, y, z]`.
 
 #### animgraph.*
 

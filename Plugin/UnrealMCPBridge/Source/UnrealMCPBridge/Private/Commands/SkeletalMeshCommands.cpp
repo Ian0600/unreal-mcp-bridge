@@ -117,7 +117,7 @@ namespace
 void FSkeletalMeshCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
     // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
-    Registry.Register(TEXT("skeletalmesh.dump_skeleton"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpSkeletonStructure"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("skeletalmesh.dump_skeleton"), MakeInspectorCommand(TEXT("/Script/UnrealMCPBridge.MCPInspectorLibrary"), TEXT("DumpSkeletonStructure"), { TEXT("asset_path") }));
     // ---- END forwarded commands ----
 
     // skeletalmesh.list_sockets — every socket the mesh answers with, its own and its skeleton's.

@@ -73,6 +73,21 @@ public class UnrealMCPBridge : ModuleRules
             // all come from these two.
             "MovieScene",
             "MovieSceneTracks",
+            // Vendored BlueprintInspector functions (Private/Inspector): blueprint graph edit,
+            // anim assets, Behavior Tree/Blackboard, StateTree extras, MVVM, Niagara script graphs
+            "BlueprintEditorLibrary",
+            "NiagaraCore",
+            "AIModule",
+            "AIGraph",
+            "BehaviorTreeEditor",
+            "GameplayTags",
+            "ModelViewViewModel",
+            "ModelViewViewModelBlueprint",
+            "ModelViewViewModelEditor",
         });
+
+        PrivateIncludePaths.Add(System.IO.Path.Combine(ModuleDirectory, "Private", "Inspector"));
+        // ParameterMapGet/Set typed-pin API lives only in NiagaraEditor's Private folder.
+        PrivateIncludePaths.Add(System.IO.Path.Combine(EngineDirectory, "Plugins/FX/Niagara/Source/NiagaraEditor/Private"));
     }
 }

@@ -4,7 +4,7 @@
 #include "IMCPCommandHandler.h"
 
 // Handles behaviortree.* (Behavior Tree and Blackboard authoring) JSON-RPC methods.
-// The commands forward to BlueprintInspector, which must be loaded for them to answer.
+// The commands run BlueprintInspector's implementation, vendored in Private/Inspector; no other plugin is needed.
 class FBehaviorTreeCommandHandler : public IMCPCommandHandler
 {
 public:

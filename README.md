@@ -44,8 +44,8 @@ an asset's parallel structures in agreement.
 | `pie.*`           | 2       | Play-In-Editor start/stop                                                      |
 | `compile.*`       | 2       | Live Coding trigger and status                                                 |
 | `object.*`        | 3       | Any UObject's properties by reflection - the escape hatch for what no domain handler covers |
-| `behaviortree.*`  | 9       | Behavior Trees and Blackboards: create, nodes, aux nodes, properties, keys (forwarded to BlueprintInspector) |
-| `blendspace.*`    | 7       | BlendSpace samples and axes, with the resample step the Python route skips (forwarded to BlueprintInspector) |
+| `behaviortree.*`  | 9       | Behavior Trees and Blackboards: create, nodes, aux nodes, properties, keys (BlueprintInspector functions, built in) |
+| `blendspace.*`    | 7       | BlendSpace samples and axes, with the resample step the Python route skips (BlueprintInspector functions, built in) |
 
 A few examples of the difference this makes:
 
@@ -68,11 +68,11 @@ A few examples of the difference this makes:
   the parallel `FWidgetAnimationBinding` array is what maps it back to a widget, and both halves
   have to be written together or the animation plays over nothing.
 
-### Commands forwarded to BlueprintInspector
+### Commands backed by BlueprintInspector functions
 
-124 of those methods are thin forwards to the **BlueprintInspector** plugin's functions (Blueprint graph editing, AnimBP / BlendSpace / Montage authoring, Behavior Trees, MVVM, Niagara script graphs, material contracts and MPC migration). They are added to the domain they belong to (`blueprint.*`, `animgraph.*`, `niagara.*`, ...), plus the new `behaviortree.*` and `blendspace.*`.
+124 of those methods run functions that originate in the **BlueprintInspector** plugin (Blueprint graph editing, AnimBP / BlendSpace / Montage authoring, Behavior Trees, MVVM, Niagara script graphs, material contracts and MPC migration). They are added to the domain they belong to (`blueprint.*`, `animgraph.*`, `niagara.*`, ...), plus the new `behaviortree.*` and `blendspace.*`.
 
-BlueprintInspector is optional. The bridge reaches it through UObject reflection, so there is no build or load dependency; until the plugin is loaded those methods answer with an `InternalError` saying so, and everything else works unchanged. The transport is not involved — these are ordinary registry commands, one MCP tool each.
+The bridge is self-contained: those functions are compiled into this plugin (`Private/Inspector`, classes renamed `MCPInspector*`), so BlueprintInspector does not have to be installed, and installing it too causes no clash. Only the functions behind these 124 methods are included; what the bridge already did natively (`animgraph.*`, `statetree.*`, ...) is not duplicated. The transport is not involved — these are ordinary registry commands, one MCP tool each.
 
 See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the method catalogue. Each method's full parameter
 list lives in the docstring of its `@mcp.tool()` wrapper under `Python/unreal_mcp_bridge/tools/`,

@@ -129,8 +129,8 @@ namespace
 void FAnimNotifyCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
     // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
-    Registry.Register(TEXT("animnotify.dump_details"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("DumpNotifyDetails"), { TEXT("asset_path") }));
-    Registry.Register(TEXT("animnotify.set_event_timing"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BlueprintInspectorLibrary"), TEXT("SetNotifyEventTiming"), { TEXT("asset_path"), TEXT("notify_index"), TEXT("new_trigger_time"), TEXT("new_duration") }));
+    Registry.Register(TEXT("animnotify.dump_details"), MakeInspectorCommand(TEXT("/Script/UnrealMCPBridge.MCPInspectorLibrary"), TEXT("DumpNotifyDetails"), { TEXT("asset_path") }));
+    Registry.Register(TEXT("animnotify.set_event_timing"), MakeInspectorCommand(TEXT("/Script/UnrealMCPBridge.MCPInspectorLibrary"), TEXT("SetNotifyEventTiming"), { TEXT("asset_path"), TEXT("notify_index"), TEXT("new_trigger_time"), TEXT("new_duration") }));
     // ---- END forwarded commands ----
 
     // animnotify.list — lists notify events on an animation. Params: animation_path,

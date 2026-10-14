@@ -359,14 +359,14 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
     def niagara_inspect_function_calls(system_asset_path: str, emitter_name: str) -> dict:
         """지정 이미터 GraphSource의 FunctionCall 이름, 스크립트 경로, 노출 입력을 읽기 전용으로 반환한다.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::InspectNiagaraFunctionCalls); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::InspectNiagaraFunctionCalls; no other plugin needed."""
         return conn.call("niagara.inspect_function_calls", {"system_asset_path": system_asset_path, "emitter_name": emitter_name})
 
     @mcp.tool()
     def niagara_inspect_module_graph(module_script_path: str) -> dict:
         """InspectNiagaraModuleGraph
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::InspectNiagaraModuleGraph); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::InspectNiagaraModuleGraph; no other plugin needed."""
         return conn.call("niagara.inspect_module_graph", {"module_script_path": module_script_path})
 
     @mcp.tool()
@@ -411,7 +411,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         usage: Module, DynamicInput or Function.
         Returns: JSON {"path","usage","nodes":n,"compileStatus"} or "ERROR|...". Not compiled unless the factory compiled it.
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::CreateNiagaraScript); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::CreateNiagaraScript; no other plugin needed."""
         return conn.call("niagara.script_create", {"asset_path": asset_path, "usage": usage})
 
     @mcp.tool()
@@ -428,7 +428,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         keywords: Space separated search keywords.
         Returns: JSON with the resulting metadata (same shape as DumpScriptGraph "metadata") or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::SetScriptMetadata); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::SetScriptMetadata; no other plugin needed."""
         return conn.call("niagara.script_set_metadata", {"script_path": script_path, "description": description, "category": category, "library_visibility": library_visibility, "module_usage_bitmask": module_usage_bitmask, "keywords": keywords})
 
     @mcp.tool()
@@ -443,7 +443,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         Returns: JSON {"status","synchronized","errors","warnings","errorMessage","events":[{"severity","message","shortDescription","nodeId","pinId"}],
          "refreshedReferencers":[node paths]} or "ERROR|...". "status" is the ENiagaraScriptCompileStatus name (NCS_UpToDate on success).
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::CompileNiagaraScript); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::CompileNiagaraScript; no other plugin needed."""
         return conn.call("niagara.script_compile", {"script_path": script_path, "force": force, "refresh_referencers": refresh_referencers})
 
     @mcp.tool()
@@ -457,7 +457,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
          "nodes":[{"id","class","title","x","y","op"?,"functionScript"?,"functionName"?,"hlsl"?,"input"?,"outputUsage"?,"outputs"?,
            "pins":[{"id","name","dir","type","default","add"?,"hidden"?,"orphaned"?,"links":[{"node","pin","pinName"}]}]}]} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::DumpScriptGraph); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::DumpScriptGraph; no other plugin needed."""
         return conn.call("niagara.script_dump_graph", {"script_path": script_path})
 
     @mcp.tool()
@@ -470,7 +470,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         map_get_node_id: Map Get node to add the read to. Empty = the Map Get fed by the input map (first one).
         Returns: JSON {"name","type","default","nodeId","pinId"} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::AddScriptInput); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::AddScriptInput; no other plugin needed."""
         return conn.call("niagara.script_add_input", {"script_path": script_path, "name": name, "type": type_, "default_value": default_value, "map_get_node_id": map_get_node_id})
 
     @mcp.tool()
@@ -479,7 +479,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         name: Input name, "Module." optional.
         Returns: JSON {"removedPins":n,"removedParameter":bool} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::RemoveScriptInput); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::RemoveScriptInput; no other plugin needed."""
         return conn.call("niagara.script_remove_input", {"script_path": script_path, "name": name})
 
     @mcp.tool()
@@ -489,7 +489,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         default_value: Value in Niagara pin format.
         Returns: JSON {"name","type","default"} (value read back) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::SetScriptInputDefault); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::SetScriptInputDefault; no other plugin needed."""
         return conn.call("niagara.script_set_input_default", {"script_path": script_path, "name": name, "default_value": default_value})
 
     @mcp.tool()
@@ -500,7 +500,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         type: Parameter type (must match the type the parameter already has in this graph).
         Returns: JSON {"nodeId","pinId","name","type"} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::AddMapGetPin); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::AddMapGetPin; no other plugin needed."""
         return conn.call("niagara.script_add_map_get_pin", {"script_path": script_path, "node_id": node_id, "parameter_name": parameter_name, "type": type_})
 
     @mcp.tool()
@@ -511,7 +511,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         type: Parameter type.
         Returns: JSON {"nodeId","pinId","name","type"} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::AddMapSetPin); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::AddMapSetPin; no other plugin needed."""
         return conn.call("niagara.script_add_map_set_pin", {"script_path": script_path, "node_id": node_id, "parameter_name": parameter_name, "type": type_})
 
     @mcp.tool()
@@ -524,7 +524,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         pos_y: Graph Y position.
         Returns: JSON node (same shape as DumpScriptGraph "nodes" entries) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::AddNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::AddNode; no other plugin needed."""
         return conn.call("niagara.script_add_node", {"script_path": script_path, "node_kind": node_kind, "arg": arg, "pos_x": pos_x, "pos_y": pos_y})
 
     @mcp.tool()
@@ -532,7 +532,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """Remove a node (breaks its links). Nodes the editor does not allow deleting (e.g. the output node) are refused.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::RemoveNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::RemoveNode; no other plugin needed."""
         return conn.call("niagara.script_remove_node", {"script_path": script_path, "node_id": node_id})
 
     @mcp.tool()
@@ -541,7 +541,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         e.g. "OutColor = InColor * Tint;".
         Returns: JSON node or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::SetCustomHlsl); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::SetCustomHlsl; no other plugin needed."""
         return conn.call("niagara.script_set_custom_hlsl", {"script_path": script_path, "node_id": node_id, "code": code})
 
     @mcp.tool()
@@ -552,7 +552,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         is_output: True for an output pin.
         Returns: JSON node or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::AddCustomHlslPin); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::AddCustomHlslPin; no other plugin needed."""
         return conn.call("niagara.script_add_custom_hlsl_pin", {"script_path": script_path, "node_id": node_id, "name": name, "type": type_, "is_output": is_output})
 
     @mcp.tool()
@@ -560,7 +560,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """Remove an input or output pin of a Custom HLSL node (signature updated, links of that pin broken).
         Returns: JSON node or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::RemoveCustomHlslPin); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::RemoveCustomHlslPin; no other plugin needed."""
         return conn.call("niagara.script_remove_custom_hlsl_pin", {"script_path": script_path, "node_id": node_id, "pin": pin})
 
     @mcp.tool()
@@ -570,7 +570,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         from_pin: Output pin (id or name). to_pin: Input pin (id or name).
         Returns: JSON {"response","message"} or "ERROR|<schema message>".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::ConnectPins); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::ConnectPins; no other plugin needed."""
         return conn.call("niagara.script_connect_pins", {"script_path": script_path, "from_node_id": from_node_id, "from_pin": from_pin, "to_node_id": to_node_id, "to_pin": to_pin})
 
     @mcp.tool()
@@ -578,7 +578,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """Break links of a pin: all of them, or only the link to OtherNodeId/OtherPin when given.
         Returns: JSON {"brokenLinks":n} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::DisconnectPin); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::DisconnectPin; no other plugin needed."""
         return conn.call("niagara.script_disconnect_pin", {"script_path": script_path, "node_id": node_id, "pin": pin, "other_node_id": other_node_id, "other_pin": other_pin})
 
     @mcp.tool()
@@ -588,7 +588,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         value_text: Value in Niagara pin format of the pin type.
         Returns: JSON {"pin","default"} (value read back) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::SetPinDefault); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::SetPinDefault; no other plugin needed."""
         return conn.call("niagara.script_set_pin_default", {"script_path": script_path, "node_id": node_id, "pin": pin, "value_text": value_text})
 
     @mcp.tool()
@@ -605,7 +605,7 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
          "ParticleUpdate", "ParticleSpawn", "EmitterUpdate", "SystemUpdate". Empty = keep the default bitmask.
         Returns: JSON {"path","name","usage","owner","moduleUsages":[...]} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::CreateScratchPadScript); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::CreateScratchPadScript; no other plugin needed."""
         return conn.call("niagara.script_create_scratch_pad", {"owner_path": owner_path, "name": name, "usage": usage, "target_stack_usage": target_stack_usage})
 
     @mcp.tool()
@@ -614,5 +614,5 @@ def register_niagara_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         owner_path: Niagara system or emitter asset path.
         Returns: JSON {"owner","scripts":[{"path","name","usage","moduleUsages":[...],"compileStatus"}]} or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPINiagaraScriptToolset::ListScratchPadScripts); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPINiagaraScriptToolset::ListScratchPadScripts; no other plugin needed."""
         return conn.call("niagara.script_list_scratch_pad", {"owner_path": owner_path})

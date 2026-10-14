@@ -13,7 +13,7 @@
 void FAssetCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
     // ---- BEGIN commands forwarded to BlueprintInspector (generated from its function headers) ----
-    Registry.Register(TEXT("asset.fixup_redirectors"), MakeInspectorCommand(TEXT("/Script/BlueprintInspector.BPIEditorToolset"), TEXT("FixupRedirectors"), { TEXT("content_paths") }));
+    Registry.Register(TEXT("asset.fixup_redirectors"), MakeInspectorCommand(TEXT("/Script/UnrealMCPBridge.MCPInspectorEditorToolset"), TEXT("FixupRedirectors"), { TEXT("content_paths") }));
     // ---- END forwarded commands ----
 
     // asset.list — returns assets under a given content path

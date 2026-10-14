@@ -768,14 +768,14 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
     def material_dump_property_connections(asset_path: str) -> dict:
         """머티리얼 최종속성(BaseColor/Metallic/Normal/...)이 어느 expression에 연결됐는지.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpMaterialPropertyConnections); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpMaterialPropertyConnections; no other plugin needed."""
         return conn.call("material.dump_property_connections", {"asset_path": asset_path})
 
     @mcp.tool()
     def material_find_using_collection(collection_path: str) -> dict:
         """주어진 MaterialParameterCollection 을 CollectionParameter 노드로 읽는 UMaterial 경로 목록(역참조).
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::FindMaterialsUsingCollection); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::FindMaterialsUsingCollection; no other plugin needed."""
         return conn.call("material.find_using_collection", {"collection_path": collection_path})
 
     @mcp.tool()
@@ -787,7 +787,7 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         (예: MakeMaterialAttributes 바로 오른쪽)에 붙이는 데 사용. 베이스 UMaterial 만 대상.
         Returns: 성공 여부 (베이스 UMaterial 아니면 false)
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::SetMaterialRootNodePosition); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::SetMaterialRootNodePosition; no other plugin needed."""
         return conn.call("material.set_root_node_position", {"asset_path": asset_path, "pos_x": pos_x, "pos_y": pos_y})
 
     @mcp.tool()
@@ -798,7 +798,7 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         하드 디폴트가 컴파일된다. 셰이딩 모델이 활성 목록에 있는지 먼저 확인할 것.
         Returns: 성공 여부 (베이스 UMaterial 아니거나 인덱스가 0/1 이 아니면 false)
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::SetMaterialCustomDataConstant); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::SetMaterialCustomDataConstant; no other plugin needed."""
         return conn.call("material.set_custom_data_constant", {"asset_path": asset_path, "custom_data_index": custom_data_index, "value": value})
 
     @mcp.tool()
@@ -808,47 +808,47 @@ def register_material_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         ★UseConstant 는 Expression 보다 우선한다(MaterialShared.cpp FScalarMaterialInput::CompileWithDefault).
           핀이 비활성인 셰이딩 모델에서는 이 값이 무시되지만, 핀을 활성화하는 순간 되살아난다.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::GetMaterialCustomDataInfo); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::GetMaterialCustomDataInfo; no other plugin needed."""
         return conn.call("material.get_custom_data_info", {"asset_path": asset_path, "custom_data_index": custom_data_index})
 
     @mcp.tool()
     def material_dump_function_contract(asset_path: str) -> dict:
         """Version-qualified material-function input/output GUID contract as JSON. Read-only.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpMaterialFunctionContractJson); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpMaterialFunctionContractJson; no other plugin needed."""
         return conn.call("material.dump_function_contract", {"asset_path": asset_path})
 
     @mcp.tool()
     def material_dump_function_caller_contract(caller_path: str, function_paths: list[str]) -> dict:
         """Material/function call-site GUID and connection contract as JSON. Read-only.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpMaterialFunctionCallerContractJson); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpMaterialFunctionCallerContractJson; no other plugin needed."""
         return conn.call("material.dump_function_caller_contract", {"caller_path": caller_path, "function_paths": function_paths})
 
     @mcp.tool()
     def material_dump_mpc_contract(collection_path: str) -> dict:
         """Full MPC GUID/name/type/default/order contract as JSON. Read-only.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpMPCContractJson); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpMPCContractJson; no other plugin needed."""
         return conn.call("material.dump_mpc_contract", {"collection_path": collection_path})
 
     @mcp.tool()
     def material_dump_mpc_bindings(asset_path: str, collection_path: str) -> dict:
         """Exact material/function CollectionParameter bindings, including serialized ParameterId. Read-only.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpMaterialMPCBindingsJson); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpMaterialMPCBindingsJson; no other plugin needed."""
         return conn.call("material.dump_mpc_bindings", {"asset_path": asset_path, "collection_path": collection_path})
 
     @mcp.tool()
     def material_merge_parameter_collection_checked(target_path: str, source_path: str, expected_target_contract_json: str) -> dict:
         """Checked, additive MPC merge. Existing target entries are immutable; source-only GUIDs append.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::MergeMaterialParameterCollectionAdditiveChecked); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::MergeMaterialParameterCollectionAdditiveChecked; no other plugin needed."""
         return conn.call("material.merge_parameter_collection_checked", {"target_path": target_path, "source_path": source_path, "expected_target_contract_json": expected_target_contract_json})
 
     @mcp.tool()
     def material_reconnect_function_call_checked(caller_path: str, node_id: str, expected_function_path: str, expected_function_contract_json: str, reconnect_spec_json: str) -> dict:
         """Restore one material-function call from a complete checked JSON connection specification.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::ReconnectMaterialFunctionCallChecked); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::ReconnectMaterialFunctionCallChecked; no other plugin needed."""
         return conn.call("material.reconnect_function_call_checked", {"caller_path": caller_path, "node_id": node_id, "expected_function_path": expected_function_path, "expected_function_contract_json": expected_function_contract_json, "reconnect_spec_json": reconnect_spec_json})

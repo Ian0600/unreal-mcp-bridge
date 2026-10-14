@@ -63,5 +63,5 @@ def register_asset_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         content_paths: Folders like "/Game/Characters" (recursive).
         Returns: JSON: {"found":int,"fixed":int,"remaining":[paths]}
 
-        Forwarded to BlueprintInspector (BPIEditorToolset::FixupRedirectors); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIEditorToolset::FixupRedirectors; no other plugin needed."""
         return conn.call("asset.fixup_redirectors", {"content_paths": content_paths})

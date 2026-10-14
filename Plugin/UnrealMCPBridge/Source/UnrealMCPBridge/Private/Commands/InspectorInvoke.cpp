@@ -44,14 +44,14 @@ FMCPCommandFunction MakeInspectorCommand(const TCHAR* ClassPath, const TCHAR* Fu
         if (!Class)
         {
             InspectorInvokeFail(OutError, MCPProtocol::FMCPError::InternalError,
-                FString::Printf(TEXT("BlueprintInspector plugin is not loaded (class %s not found)"), *Path));
+                FString::Printf(TEXT("built-in inspector class %s not found"), *Path));
             return nullptr;
         }
         UFunction* Function = Class->FindFunctionByName(*Name);
         if (!Function)
         {
             InspectorInvokeFail(OutError, MCPProtocol::FMCPError::InternalError,
-                FString::Printf(TEXT("%s::%s not found (update the BlueprintInspector plugin)"), *Path, *Name));
+                FString::Printf(TEXT("%s::%s not found (rebuild the plugin)"), *Path, *Name));
             return nullptr;
         }
 

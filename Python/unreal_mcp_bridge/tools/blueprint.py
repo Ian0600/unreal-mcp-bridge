@@ -62,7 +62,7 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
     def blueprint_connect_pins(asset_path: str, source_node_name: str, source_pin_name: str, target_node_name: str, target_pin_name: str) -> dict:
         """ConnectPins
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::ConnectPins); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::ConnectPins; no other plugin needed."""
         return conn.call("blueprint.connect_pins", {"asset_path": asset_path, "source_node_name": source_node_name, "source_pin_name": source_pin_name, "target_node_name": target_node_name, "target_pin_name": target_pin_name})
 
     @mcp.tool()
@@ -70,98 +70,98 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """특정 그래프 스코프 내에서 핀 연결. 같은 이름 노드가 여러 그래프에 있을 때 사용.
         ConnectPins와 달리 지정한 그래프 내 노드만 검색.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::ConnectPinsInGraph); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::ConnectPinsInGraph; no other plugin needed."""
         return conn.call("blueprint.connect_pins_in_graph", {"asset_path": asset_path, "graph_name": graph_name, "source_node_name": source_node_name, "source_pin_name": source_pin_name, "target_node_name": target_node_name, "target_pin_name": target_pin_name})
 
     @mcp.tool()
     def blueprint_disconnect_pin(asset_path: str, node_name: str, pin_name: str) -> dict:
         """DisconnectPin
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DisconnectPin); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DisconnectPin; no other plugin needed."""
         return conn.call("blueprint.disconnect_pin", {"asset_path": asset_path, "node_name": node_name, "pin_name": pin_name})
 
     @mcp.tool()
     def blueprint_set_pin_default_value(asset_path: str, node_name: str, pin_name: str, new_value: str) -> dict:
         """SetPinDefaultValue
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::SetPinDefaultValue); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::SetPinDefaultValue; no other plugin needed."""
         return conn.call("blueprint.set_pin_default_value", {"asset_path": asset_path, "node_name": node_name, "pin_name": pin_name, "new_value": new_value})
 
     @mcp.tool()
     def blueprint_set_pin_default_value_by_graph_index(asset_path: str, graph_index: int, node_index: int, pin_name: str, new_value: str) -> dict:
         """그래프/노드 인덱스 기반 핀 기본값 설정. 같은 이름 노드가 여럿일 때 사용.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::SetPinDefaultValueByGraphIndex); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::SetPinDefaultValueByGraphIndex; no other plugin needed."""
         return conn.call("blueprint.set_pin_default_value_by_graph_index", {"asset_path": asset_path, "graph_index": graph_index, "node_index": node_index, "pin_name": pin_name, "new_value": new_value})
 
     @mcp.tool()
     def blueprint_remove_node(asset_path: str, node_name: str) -> dict:
         """RemoveNode
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::RemoveNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::RemoveNode; no other plugin needed."""
         return conn.call("blueprint.remove_node", {"asset_path": asset_path, "node_name": node_name})
 
     @mcp.tool()
     def blueprint_add_call_function_node(asset_path: str, graph_name: str, function_name: str, pos_x: int, pos_y: int) -> dict:
         """AddCallFunctionNode
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::AddCallFunctionNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::AddCallFunctionNode; no other plugin needed."""
         return conn.call("blueprint.add_call_function_node", {"asset_path": asset_path, "graph_name": graph_name, "function_name": function_name, "pos_x": pos_x, "pos_y": pos_y})
 
     @mcp.tool()
     def blueprint_add_variable_get_node(asset_path: str, graph_name: str, var_name: str, pos_x: int, pos_y: int) -> dict:
         """변수 Getter 노드(K2Node_VariableGet) 를 그래프에 추가. VarName = Blueprint 멤버 변수 이름. 반환: 생성 노드 이름 (빈 문자열 = 실패).
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::AddVariableGetNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::AddVariableGetNode; no other plugin needed."""
         return conn.call("blueprint.add_variable_get_node", {"asset_path": asset_path, "graph_name": graph_name, "var_name": var_name, "pos_x": pos_x, "pos_y": pos_y})
 
     @mcp.tool()
     def blueprint_add_variable_set_node(asset_path: str, graph_name: str, var_name: str, pos_x: int, pos_y: int) -> dict:
         """변수 Setter 노드(K2Node_VariableSet) 를 그래프에 추가.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::AddVariableSetNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::AddVariableSetNode; no other plugin needed."""
         return conn.call("blueprint.add_variable_set_node", {"asset_path": asset_path, "graph_name": graph_name, "var_name": var_name, "pos_x": pos_x, "pos_y": pos_y})
 
     @mcp.tool()
     def blueprint_add_array_get_item_node(asset_path: str, graph_name: str, pos_x: int, pos_y: int) -> dict:
         """Array Get Item 노드(K2Node_GetArrayItem) 를 그래프에 추가. UE Editor 에서 변수 핀 드래그→Get 으로 만든 것과 동일 — wildcard 자동 type 추론 지원. 반환: 생성 노드 이름.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::AddArrayGetItemNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::AddArrayGetItemNode; no other plugin needed."""
         return conn.call("blueprint.add_array_get_item_node", {"asset_path": asset_path, "graph_name": graph_name, "pos_x": pos_x, "pos_y": pos_y})
 
     @mcp.tool()
     def blueprint_reconstruct_node(asset_path: str, node_name: str) -> dict:
         """노드 이름으로 재구성 (핀 재생성).
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::ReconstructNode); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::ReconstructNode; no other plugin needed."""
         return conn.call("blueprint.reconstruct_node", {"asset_path": asset_path, "node_name": node_name})
 
     @mcp.tool()
     def blueprint_reconstruct_node_by_graph_index(asset_path: str, graph_index: int, node_index: int) -> dict:
         """그래프/노드 인덱스로 노드 재구성. Enum 변경 후 BlendPoses 등 핀 에러 복구에 사용. RemovedPins도 클리어.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::ReconstructNodeByGraphIndex); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::ReconstructNodeByGraphIndex; no other plugin needed."""
         return conn.call("blueprint.reconstruct_node_by_graph_index", {"asset_path": asset_path, "graph_index": graph_index, "node_index": node_index})
 
     @mcp.tool()
     def blueprint_get_graphs(asset_path: str) -> dict:
         """GetBlueprintGraphs
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::GetBlueprintGraphs); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::GetBlueprintGraphs; no other plugin needed."""
         return conn.call("blueprint.get_graphs", {"asset_path": asset_path})
 
     @mcp.tool()
     def blueprint_get_graph_nodes_by_index(asset_path: str, graph_index: int) -> dict:
         """그래프 인덱스로 노드 목록 반환. 같은 이름 그래프가 여럿일 때 인덱스로 구분.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::GetGraphNodesByIndex); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::GetGraphNodesByIndex; no other plugin needed."""
         return conn.call("blueprint.get_graph_nodes_by_index", {"asset_path": asset_path, "graph_index": graph_index})
 
     @mcp.tool()
     def blueprint_get_all_nodes(asset_path: str) -> dict:
         """GetAllNodesInBlueprint
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::GetAllNodesInBlueprint); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::GetAllNodesInBlueprint; no other plugin needed."""
         return conn.call("blueprint.get_all_nodes", {"asset_path": asset_path})
 
     @mcp.tool()
@@ -184,14 +184,14 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
                                    path 는 "/Game/.../Asset.Asset" 또는 "/Game/.../Asset" (확장 자동).
         Returns: 성공 시 새 BP 의 asset path. 실패 시 빈 문자열.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DuplicateBlueprintWithRemap); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DuplicateBlueprintWithRemap; no other plugin needed."""
         return conn.call("blueprint.duplicate_with_remap", {"source_asset_path": source_asset_path, "dest_asset_path": dest_asset_path, "new_skeleton": new_skeleton, "asset_substitutions": asset_substitutions})
 
     @mcp.tool()
     def blueprint_reparent_checked(blueprint_path: str, expected_old_parent: str, new_parent: str) -> dict:
         """Checked Blueprint parent replacement, compile, save, and readback.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::ReparentBlueprintChecked); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::ReparentBlueprintChecked; no other plugin needed."""
         return conn.call("blueprint.reparent_checked", {"blueprint_path": blueprint_path, "expected_old_parent": expected_old_parent, "new_parent": new_parent})
 
     @mcp.tool()
@@ -199,14 +199,14 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """AnimBP의 헤더(부모 클래스/스켈레톤/인터페이스/변수/그래프 이름) 추출.
         UE 4.27 Python API에서 noexpose/protected 처리된 UBlueprint 프로퍼티들을 cpp에서 우회하여 노출.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::GetAnimBlueprintHeader); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::GetAnimBlueprintHeader; no other plugin needed."""
         return conn.call("blueprint.get_header", {"asset_path": asset_path})
 
     @mcp.tool()
     def blueprint_dump_asset_references(asset_path: str) -> dict:
         """DumpAssetReferences
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpAssetReferences); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpAssetReferences; no other plugin needed."""
         return conn.call("blueprint.dump_asset_references", {"asset_path": asset_path})
 
     @mcp.tool()
@@ -222,49 +222,49 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         
         자기 자신 패키지는 결과에서 제외. 중복 제거 후 정렬.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpCDOReferences); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpCDOReferences; no other plugin needed."""
         return conn.call("blueprint.dump_cdo_references", {"asset_path": asset_path})
 
     @mcp.tool()
     def blueprint_dump_function_calls(asset_path: str) -> dict:
         """DumpFunctionCalls
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpFunctionCalls); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpFunctionCalls; no other plugin needed."""
         return conn.call("blueprint.dump_function_calls", {"asset_path": asset_path})
 
     @mcp.tool()
     def blueprint_dump_variable_usages(asset_path: str) -> dict:
         """DumpVariableUsages
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpVariableUsages); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpVariableUsages; no other plugin needed."""
         return conn.call("blueprint.dump_variable_usages", {"asset_path": asset_path})
 
     @mcp.tool()
     def blueprint_dump_event_entries(asset_path: str) -> dict:
         """DumpEventEntries
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpEventEntries); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpEventEntries; no other plugin needed."""
         return conn.call("blueprint.dump_event_entries", {"asset_path": asset_path})
 
     @mcp.tool()
     def blueprint_dump_function_signatures(asset_path: str) -> dict:
         """DumpFunctionSignatures
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpFunctionSignatures); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpFunctionSignatures; no other plugin needed."""
         return conn.call("blueprint.dump_function_signatures", {"asset_path": asset_path})
 
     @mcp.tool()
     def blueprint_dump_mpc_bindings(blueprint_path: str, collection_path: str) -> dict:
         """Exact Blueprint MPC calls bound to CollectionPath, including node/pin identity. Read-only.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpBlueprintMPCBindingsJson); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpBlueprintMPCBindingsJson; no other plugin needed."""
         return conn.call("blueprint.dump_mpc_bindings", {"blueprint_path": blueprint_path, "collection_path": collection_path})
 
     @mcp.tool()
     def blueprint_remap_mpc_call_checked(blueprint_path: str, graph_name: str, node_guid: str, collection_path: str, expected_source_name: str, retained_target_name: str, expected_shared_guid: str) -> dict:
         """Checked literal ParameterName remap on one positively identified MPC call node.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::RemapMPCBlueprintCallChecked); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::RemapMPCBlueprintCallChecked; no other plugin needed."""
         return conn.call("blueprint.remap_mpc_call_checked", {"blueprint_path": blueprint_path, "graph_name": graph_name, "node_guid": node_guid, "collection_path": collection_path, "expected_source_name": expected_source_name, "retained_target_name": retained_target_name, "expected_shared_guid": expected_shared_guid})
 
     @mcp.tool()
@@ -292,7 +292,7 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         asset_path: Package path of the new asset, e.g. "/Game/Interfaces/BPI_Interactable". Fails if it exists.
         Returns: Object path of the created interface, or an "ERROR|..." string.
 
-        Forwarded to BlueprintInspector (BPIInterfaceToolset::CreateBlueprintInterface); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIInterfaceToolset::CreateBlueprintInterface; no other plugin needed."""
         return conn.call("blueprint.create_interface", {"asset_path": asset_path})
 
     @mcp.tool()
@@ -304,7 +304,7 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         outputs: "Name:Type,..." output parameters (makes it a function instead of an event).
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIInterfaceToolset::AddInterfaceFunction); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIInterfaceToolset::AddInterfaceFunction; no other plugin needed."""
         return conn.call("blueprint.add_interface_function", {"interface_path": interface_path, "function_name": function_name, "inputs": inputs, "outputs": outputs})
 
     @mcp.tool()
@@ -313,7 +313,7 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         Adds stub graphs for interface functions. Compiles the Blueprint.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIInterfaceToolset::ImplementInterface); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIInterfaceToolset::ImplementInterface; no other plugin needed."""
         return conn.call("blueprint.implement_interface", {"blueprint_path": blueprint_path, "interface_path": interface_path})
 
     @mcp.tool()
@@ -322,7 +322,7 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         preserve_functions: Keep the implemented function graphs as normal functions.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIInterfaceToolset::RemoveInterface); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIInterfaceToolset::RemoveInterface; no other plugin needed."""
         return conn.call("blueprint.remove_interface", {"blueprint_path": blueprint_path, "interface_path": interface_path, "preserve_functions": preserve_functions})
 
     @mcp.tool()
@@ -330,5 +330,5 @@ def register_blueprint_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """List interfaces implemented by a Blueprint (including inherited ones, marked).
         Returns: JSON array: [{"interface":path,"inherited":bool,"graphs":[names]}]
 
-        Forwarded to BlueprintInspector (BPIInterfaceToolset::ListImplementedInterfaces); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIInterfaceToolset::ListImplementedInterfaces; no other plugin needed."""
         return conn.call("blueprint.list_implemented_interfaces", {"blueprint_path": blueprint_path})

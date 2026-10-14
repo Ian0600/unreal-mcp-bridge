@@ -98,5 +98,5 @@ def register_skeletalmesh_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
     def skeletalmesh_dump_skeleton(asset_path: str) -> dict:
         """스켈레톤 구조 덤프: 슬롯그룹/가상본/소켓/커브 이름/호환 스켈레톤/프리뷰 메시.
 
-        Forwarded to BlueprintInspector (BlueprintInspectorLibrary::DumpSkeletonStructure); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BlueprintInspectorLibrary::DumpSkeletonStructure; no other plugin needed."""
         return conn.call("skeletalmesh.dump_skeleton", {"asset_path": asset_path})

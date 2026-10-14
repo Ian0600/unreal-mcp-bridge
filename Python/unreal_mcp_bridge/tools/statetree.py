@@ -264,7 +264,7 @@ def register_statetree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         target_node_id: Id of the node whose property will be bound (from DumpStateTree).
         Returns: JSON [{"id":structId,"name","struct","properties":[{"name","type"}]}] or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIStateTreeToolset::ListStateTreeBindingSources); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIStateTreeToolset::ListStateTreeBindingSources; no other plugin needed."""
         return conn.call("statetree.list_binding_sources", {"tree_path": tree_path, "target_node_id": target_node_id})
 
     @mcp.tool()
@@ -272,7 +272,7 @@ def register_statetree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         """Remove the binding(s) of a node property.
         Returns: "OK" or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIStateTreeToolset::UnbindStateTreeProperty); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIStateTreeToolset::UnbindStateTreeProperty; no other plugin needed."""
         return conn.call("statetree.unbind_property", {"tree_path": tree_path, "target_node_id": target_node_id, "target_property_path": target_property_path})
 
     @mcp.tool()
@@ -281,5 +281,5 @@ def register_statetree_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         type: bool, int, int64, float, double, name, string, text, enum:<EnumPath>, struct:<StructPath>, object:<ClassPath>, class:<ClassPath>.
         Returns: The root parameters struct id (use as SourceStructId) or "ERROR|...".
 
-        Forwarded to BlueprintInspector (BPIStateTreeToolset::AddStateTreeParameter); requires that plugin to be loaded."""
+        Built-in port of BlueprintInspector's BPIStateTreeToolset::AddStateTreeParameter; no other plugin needed."""
         return conn.call("statetree.add_parameter", {"tree_path": tree_path, "name": name, "type": type_})
