@@ -1279,7 +1279,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BlueprintInspector", meta = (AICallable))
 	static bool SetAnimGraphNodePropertyByIndex(const FString& AssetPath, int32 GraphIndex, int32 NodeIndex, const FString& PropertyPath, const FString& ValueText);
 
-	// ---- BEGIN functions forwarding to unreal-mcp-bridge methods (generated from the bridge tool layer; BlueprintInspector has no dependency on that plugin) ----
+	// ---- BEGIN functions forwarding to unreal-mcp-bridge methods (generated from the bridge tool layer; the implementation is compiled into this module, see Private/Embedded) ----
 
 
 

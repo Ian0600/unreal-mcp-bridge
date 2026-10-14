@@ -1,6 +1,6 @@
 [project]
 name = "unreal-mcp-bridge"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server bridging to Unreal Editor via JSON-RPC 2.0"
 requires-python = ">=3.10"
 dependencies = [

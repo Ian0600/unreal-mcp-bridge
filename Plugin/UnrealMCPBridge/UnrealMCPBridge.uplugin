@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 3,
-  "VersionName": "0.3.0",
+  "Version": 4,
+  "VersionName": "0.3.1",
   "FriendlyName": "Unreal MCP Bridge",
   "Description": "JSON-RPC 2.0 bridge between Unreal Editor and MCP clients",
   "Category": "Editor",

@@ -46,7 +46,7 @@ namespace
             {
                 OutNodes.Add(Node);
             }
-        }, /*bIncludeNestedObjects=*/true);
+        }, EGetObjectsFlags::IncludeNestedObjects);
     }
 
     // Matches a node's class by short name, case-insensitive, with or without the leading 'U'

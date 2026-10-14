@@ -37,7 +37,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BlueprintInspector|Editor", meta = (AICallable))
 	static FString FixupRedirectors(const TArray<FString>& ContentPaths);
 
-	// ---- BEGIN functions forwarding to unreal-mcp-bridge methods (generated from the bridge tool layer; BlueprintInspector has no dependency on that plugin) ----
+	// ---- BEGIN functions forwarding to unreal-mcp-bridge methods (generated from the bridge tool layer; the implementation is compiled into this module, see Private/Embedded) ----
 
 
 

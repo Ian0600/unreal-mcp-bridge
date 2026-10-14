@@ -1308,7 +1308,7 @@ namespace
             {
                 Nodes.Add(Node);
             }
-        }, /*bIncludeNestedObjects=*/true);
+        }, EGetObjectsFlags::IncludeNestedObjects);
 
         int32 MatchIndex = 0;
         for (UCameraNode* Node : Nodes)
