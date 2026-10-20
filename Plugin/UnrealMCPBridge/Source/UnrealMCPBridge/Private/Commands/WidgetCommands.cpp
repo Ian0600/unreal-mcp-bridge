@@ -1116,10 +1116,16 @@ void FWidgetCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 return nullptr;
             }
 
-            // Export/import round-trip is how the editor's own duplicate works: it clones the
-            // whole subtree with slot data intact and assigns fresh unique names.
+            // Export/import round-trip is how the editor's own duplicate works
+            // (FWidgetBlueprintEditorUtils::CopyWidgetsInternal). ExportWidgetsToText only
+            // serializes the widgets it is handed — a panel's slots reference children by name —
+            // so the descendants must be exported too. Exporting the root alone made the import
+            // resolve those names to the ORIGINAL children and reparent them into the copy.
+            TArray<UWidget*> WidgetsToExport{ Source };
+            UWidgetTree::GetChildWidgets(Source, WidgetsToExport);
+
             FString ExportedText;
-            FWidgetBlueprintEditorUtils::ExportWidgetsToText({ Source }, ExportedText);
+            FWidgetBlueprintEditorUtils::ExportWidgetsToText(WidgetsToExport, ExportedText);
 
             TSet<UWidget*> ImportedWidgets;
             TMap<FName, UWidgetSlotPair*> SlotData;
