@@ -8,6 +8,17 @@
 #include "IPAddress.h"
 #include "Sockets.h"
 #include "Common/TcpSocketBuilder.h"
+#include "HAL/PlatformTime.h"
+#include "Misc/ScopeExit.h"
+#include "Misc/ScopeLock.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SWindow.h"
+
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include <Windows.h>
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif
 
 namespace
 {
@@ -17,6 +28,107 @@ namespace
     constexpr double ReadPollMillis = 200.0;
     // Hard cap so SendResponse cannot wedge if the peer stops draining.
     constexpr double SendWaitSeconds = 5.0;
+
+    // GameThread 에서 지금 돌고 있는 명령. 타임아웃 때 "명령이 시작조차 못 했는지(앞 명령이 막고 있음)"
+    // 와 "시작해서 안 끝나는지(모달 대기 등)"를 가려 알려 주려고 둔다. 리스너가 여럿이라 전역이다.
+    FCriticalSection GInFlightLock;
+    FString GInFlightMethod;
+    double GInFlightStartSeconds = 0.0;
+
+    // reload_packages 같은 호출이 확인 창을 띄우면 GameThread 는 그 창의 모달 루프에서 사용자를 기다리고,
+    // 클라이언트는 "timed out" 만 받았다(2026-10-19 애니 팀 요청). Slate 모달 루프는 틱마다
+    // ModalLoopTickEvent 를 쏘므로 거기서(GameThread) 모달 창 제목과 시각을 적어 두고, 타임아웃 때 읽는다.
+    // 창 HWND 로는 못 가린다 — Slate 모달은 주인 창을 비활성화하지 않는다(시험 확인).
+    FString GModalTitle;            // GInFlightLock 으로 보호
+    double GLastModalTickSeconds = 0.0;
+    int32 GModalHookRefs = 0;       // 리스너마다 잡고 놓는다. GameThread 에서만 건드린다.
+    FDelegateHandle GModalTickHandle;
+
+    void AcquireModalHook()
+    {
+        if (GModalHookRefs++ == 0 && FSlateApplication::IsInitialized())
+        {
+            GModalTickHandle = FSlateApplication::Get().GetOnModalLoopTickEvent().AddLambda([](float)
+            {
+                FString Title;
+                if (const TSharedPtr<SWindow> Modal = FSlateApplication::Get().GetActiveModalWindow())
+                {
+                    Title = Modal->GetTitle().ToString();
+                }
+                FScopeLock Lock(&GInFlightLock);
+                GModalTitle = Title;
+                GLastModalTickSeconds = FPlatformTime::Seconds();
+            });
+        }
+    }
+
+    void ReleaseModalHook()
+    {
+        if (--GModalHookRefs == 0 && GModalTickHandle.IsValid())
+        {
+            if (FSlateApplication::IsInitialized())
+            {
+                FSlateApplication::Get().GetOnModalLoopTickEvent().Remove(GModalTickHandle);
+            }
+            GModalTickHandle.Reset();
+        }
+    }
+
+    // 에디터 프로세스의 보이는 최상위 창 목록 — 무엇이 떠 있는지 같이 돌려준다. Win32 대화상자(#32770,
+    // 네이티브 MessageBox)는 Slate 모달 루프를 안 거치므로 여기서 모달로 잡는다.
+    //
+    // 리스너 스레드에서 부르므로 GameThread 로 메시지를 보내는 API 는 쓰지 않는다 — GetWindowText 는
+    // WM_GETTEXT 를 보내 GameThread 가 바쁘면 여기까지 멈춘다. InternalGetWindowText 는 보내지 않는다.
+    TSharedPtr<FJsonValue> CollectProcessWindows(const FString& SlateModalTitle, bool& bOutModalSuspected, FString& OutModalTitle)
+    {
+        TArray<TSharedPtr<FJsonValue>> Out;
+#if PLATFORM_WINDOWS
+        struct FEnumState
+        {
+            DWORD ProcessId;
+            TArray<HWND> Windows;
+        } State{ ::GetCurrentProcessId(), {} };
+
+        ::EnumWindows([](HWND Hwnd, LPARAM Param) -> BOOL
+        {
+            FEnumState* S = reinterpret_cast<FEnumState*>(Param);
+            DWORD Pid = 0;
+            ::GetWindowThreadProcessId(Hwnd, &Pid);
+            if (Pid == S->ProcessId && ::IsWindowVisible(Hwnd))
+            {
+                S->Windows.Add(Hwnd);
+            }
+            return 1;   // 계속 열거 (HideWindowsPlatformTypes 뒤라 TRUE 매크로가 없다)
+        }, reinterpret_cast<LPARAM>(&State));
+
+        for (HWND Hwnd : State.Windows)
+        {
+            WCHAR Title[256] = { 0 };
+            WCHAR ClassName[128] = { 0 };
+            ::InternalGetWindowText(Hwnd, Title, UE_ARRAY_COUNT(Title));
+            ::GetClassNameW(Hwnd, ClassName, UE_ARRAY_COUNT(ClassName));
+            const bool bEnabled = ::IsWindowEnabled(Hwnd) != 0;
+            const HWND Owner = ::GetWindow(Hwnd, GW_OWNER);
+            const bool bLooksModal = FCString::Strcmp(ClassName, TEXT("#32770")) == 0
+                || (bOutModalSuspected && !SlateModalTitle.IsEmpty() && SlateModalTitle == Title);
+
+            auto Obj = MakeShared<FJsonObject>();
+            Obj->SetStringField(TEXT("title"), Title);
+            Obj->SetStringField(TEXT("class"), ClassName);
+            Obj->SetBoolField(TEXT("enabled"), bEnabled);
+            Obj->SetBoolField(TEXT("owned"), Owner != nullptr);
+            Obj->SetBoolField(TEXT("looks_modal"), bLooksModal);
+            Out.Add(MakeShared<FJsonValueObject>(Obj));
+
+            if (bLooksModal && OutModalTitle.IsEmpty())
+            {
+                bOutModalSuspected = true;
+                OutModalTitle = Title;
+            }
+        }
+#endif
+        return MakeShared<FJsonValueArray>(Out);
+    }
 }
 
 FMCPServerRunnable::FMCPServerRunnable(
@@ -32,10 +144,13 @@ FMCPServerRunnable::FMCPServerRunnable(
     , CommandRegistry(Registry)
     , bStopRequested(false)
 {
+    AcquireModalHook();
 }
 
 FMCPServerRunnable::~FMCPServerRunnable()
 {
+    ReleaseModalHook();
+
     // Final safety: resources should already be released via RequestStopAndWait/Exit.
     if (ListenSocket)
     {
@@ -338,13 +453,36 @@ MCPProtocol::FMCPResponse FMCPServerRunnable::DispatchToGameThread(const MCPProt
         TSharedPtr<FJsonObject> Result;
         MCPProtocol::FMCPError DispatchError;
 
+        // 모달 루프 안에서 다른 명령이 다시 들어올 수 있어(중첩) 이전 값을 저장했다가 되돌린다.
+        FString PrevMethod;
+        double PrevStart = 0.0;
+        {
+            FScopeLock Lock(&GInFlightLock);
+            PrevMethod = GInFlightMethod;
+            PrevStart = GInFlightStartSeconds;
+            GInFlightMethod = Method;
+            GInFlightStartSeconds = FPlatformTime::Seconds();
+        }
+        ON_SCOPE_EXIT
+        {
+            FScopeLock Lock(&GInFlightLock);
+            GInFlightMethod = PrevMethod;
+            GInFlightStartSeconds = PrevStart;
+        };
+
         if (Registry->Dispatch(Method, Params, Result, DispatchError))
         {
             Promise.SetValue(MCPProtocol::MakeResult(Id, Result));
         }
         else
         {
-            Promise.SetValue(MCPProtocol::MakeError(Id, DispatchError.Code, DispatchError.Message));
+            // Forward the handler's optional diagnostic payload too. MakeError only takes
+            // code and message, so rebuilding through it would drop Data on the floor —
+            // PROTOCOL.md documents "data" on error responses, and handlers rely on it to
+            // explain partial failures (which assets were skipped, and why).
+            MCPProtocol::FMCPResponse ErrorResponse = MCPProtocol::MakeError(Id, DispatchError.Code, DispatchError.Message);
+            ErrorResponse.Error->Data = DispatchError.Data;
+            Promise.SetValue(MoveTemp(ErrorResponse));
         }
     });
 
@@ -354,9 +492,58 @@ MCPProtocol::FMCPResponse FMCPServerRunnable::DispatchToGameThread(const MCPProt
         return Future.Get();
     }
 
-    UE_LOG(LogMCPBridge, Warning,
-        TEXT("MCPServerRunnable: GameThread dispatch timed out for method '%s'."), *Method);
-    return MCPProtocol::MakeError(Id,
-        MCPProtocol::FMCPError::InternalError,
-        TEXT("GameThread dispatch timed out"));
+    FString InFlightMethod;
+    double InFlightSeconds = 0.0;
+    bool bModalSuspected = false;
+    FString ModalTitle;
+    {
+        FScopeLock Lock(&GInFlightLock);
+        const double Now = FPlatformTime::Seconds();
+        InFlightMethod = GInFlightMethod;
+        if (!InFlightMethod.IsEmpty())
+        {
+            InFlightSeconds = Now - GInFlightStartSeconds;
+        }
+        // 모달 루프는 프레임마다 틱한다 — 1초 안에 틱이 있었으면 지금 모달이 떠 있다.
+        if (Now - GLastModalTickSeconds < 1.0)
+        {
+            bModalSuspected = true;
+            ModalTitle = GModalTitle;
+        }
+    }
+    const FString SlateModalTitle = ModalTitle;
+    TSharedPtr<FJsonValue> Windows = CollectProcessWindows(SlateModalTitle, bModalSuspected, ModalTitle);
+
+    FString Message = TEXT("GameThread dispatch timed out");
+    if (bModalSuspected)
+    {
+        Message += FString::Printf(TEXT(" — waiting on a modal window \"%s\" (close it in the editor; the command may then finish on its own)"), *ModalTitle);
+    }
+    else if (InFlightMethod.IsEmpty())
+    {
+        Message += TEXT(" — the GameThread did not pick the command up (busy: loading, compiling, or a long tick)");
+    }
+    else if (InFlightMethod != Method)
+    {
+        Message += FString::Printf(TEXT(" — still running an earlier command '%s' (%.1fs)"), *InFlightMethod, InFlightSeconds);
+    }
+    else
+    {
+        Message += FString::Printf(TEXT(" — '%s' started but has not returned (%.1fs)"), *Method, InFlightSeconds);
+    }
+
+    UE_LOG(LogMCPBridge, Warning, TEXT("MCPServerRunnable: %s (method '%s')."), *Message, *Method);
+
+    auto Data = MakeShared<FJsonObject>();
+    Data->SetStringField(TEXT("method"), Method);
+    Data->SetNumberField(TEXT("timeout_seconds"), DispatchTimeoutSec);
+    Data->SetStringField(TEXT("in_flight_method"), InFlightMethod);
+    Data->SetNumberField(TEXT("in_flight_seconds"), InFlightSeconds);
+    Data->SetBoolField(TEXT("modal_suspected"), bModalSuspected);
+    Data->SetStringField(TEXT("modal_title"), ModalTitle);
+    Data->SetField(TEXT("windows"), Windows);
+
+    MCPProtocol::FMCPResponse ErrorResponse = MCPProtocol::MakeError(Id, MCPProtocol::FMCPError::InternalError, Message);
+    ErrorResponse.Error->Data = MakeShared<FJsonValueObject>(Data);
+    return ErrorResponse;
 }

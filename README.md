@@ -45,12 +45,35 @@ Changes apply **immediately** — toggling **Enabled** or changing the **Port** 
 Project Settings starts/restarts the listener on the spot, **no editor restart
 required**. (The listener also auto-starts on editor launch whenever it is enabled.)
 
-The corresponding `DefaultEngine.ini` section is:
+The settings live in the plugin's own config branch, not in `DefaultEngine.ini`.
+The default layer ships with the plugin, disabled:
+
 ```ini
+; Plugin/UnrealMCPBridge/Config/DefaultUnrealMCPBridge.ini
 [/Script/UnrealMCPBridge.MCPSettings]
-bEnabled=True
-Port=30100
+bEnabled=False
+Host=127.0.0.1
+Port=0
 ```
+
+Turn it on either in Project Settings, or by editing one of the layers below —
+for example `bEnabled=True` and `Port=30100`.
+
+Layers, lowest priority first:
+
+| Layer | Path | Written by |
+|---|---|---|
+| Plugin default | `Plugins/UnrealMCPBridge/Config/DefaultUnrealMCPBridge.ini` | by hand |
+| Project override (optional) | `<Project>/Config/DefaultUnrealMCPBridge.ini` | by hand |
+| Per user | `<Project>/Saved/Config/<Platform>/UnrealMCPBridge.ini` | Project Settings |
+
+Editing a value in Project Settings writes it to the `Saved` file; values equal to
+the plugin default are not written at all. The engine never writes back into the
+plugin folder.
+
+> Keep `Config/DefaultUnrealMCPBridge.ini` in the plugin. A plugin config branch
+> with no static layer is dropped during load, after which the settings fall back
+> to a no-save config file and changes silently stop persisting.
 
 ## Python Package Installation
 

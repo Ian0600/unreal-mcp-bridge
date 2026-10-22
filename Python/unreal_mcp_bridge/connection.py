@@ -13,7 +13,12 @@ class MCPRemoteError(Exception):
     """Raised when the UE plugin returns a JSON-RPC error object."""
 
     def __init__(self, code: int, message: str, data: Any = None) -> None:
-        super().__init__(f"[{code}] {message}")
+        # data rides along in the text too: MCP clients only see str(exception), and the plugin puts
+        # the useful part there (which assets were skipped, which modal window blocks the GameThread).
+        text = f"[{code}] {message}"
+        if data is not None:
+            text += "\ndata: " + json.dumps(data, ensure_ascii=False)
+        super().__init__(text)
         self.code = code
         self.message = message
         self.data = data
@@ -45,6 +50,23 @@ class UnrealConnection:
         # Switch to blocking mode with request timeout for subsequent IO.
         sock.settimeout(self._settings.request_timeout)
         self._sock = sock
+        # A fresh connection never inherits bytes from the old one.
+        self._recv_buffer = b""
+
+    def _drop_connection(self) -> None:
+        """Close the socket and discard any partial response.
+
+        Every IO failure goes through here. Just forgetting the socket used to leave _recv_buffer
+        behind: after an over-long line the buffer stayed at max_line_bytes, so every later call
+        failed the size check before reading anything, and after a timeout the late reply's tail
+        would be glued onto the next response."""
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+        self._sock = None
+        self._recv_buffer = b""
 
     def _ensure_connected(self) -> None:
         """Reconnect once if the socket appears to have been closed."""
@@ -82,17 +104,18 @@ class UnrealConnection:
             try:
                 self._sock.sendall(encoded)
             except OSError as exc:
-                self._sock = None
+                self._drop_connection()
                 raise ConnectionError(f"Send failed: {exc}") from exc
 
             # Override timeout for this call if requested.
             if timeout is not None:
                 self._sock.settimeout(timeout)
 
-            # Receive the response line.
+            # Receive the response line. _recv_line drops the connection on failure, so the
+            # timeout override below only needs restoring when the socket survived.
             response_line = self._recv_line()
 
-            if timeout is not None:
+            if timeout is not None and self._sock is not None:
                 # Restore default timeout.
                 self._sock.settimeout(self._settings.request_timeout)
 
@@ -103,6 +126,9 @@ class UnrealConnection:
             raise ConnectionError(f"Invalid JSON from server: {exc}") from exc
 
         if response.get("id") != request_id:
+            # The stream is out of step; reconnect rather than keep reading someone else's replies.
+            with self._lock:
+                self._drop_connection()
             raise ConnectionError(
                 f"Response id mismatch: expected {request_id}, got {response.get('id')}"
             )
@@ -124,21 +150,21 @@ class UnrealConnection:
 
         while b"\n" not in self._recv_buffer:
             if len(self._recv_buffer) >= max_bytes:
-                self._sock = None
+                self._drop_connection()
                 raise ConnectionError(
                     f"Response line exceeded {max_bytes} bytes without a newline delimiter"
                 )
             try:
-                chunk = self._sock.recv(4096)
+                chunk = self._sock.recv(65536)
             except socket.timeout as exc:
-                self._sock = None
+                self._drop_connection()
                 raise TimeoutError("Timed out waiting for response from UE plugin") from exc
             except OSError as exc:
-                self._sock = None
+                self._drop_connection()
                 raise ConnectionError(f"Receive failed: {exc}") from exc
 
             if not chunk:
-                self._sock = None
+                self._drop_connection()
                 raise ConnectionError("Connection closed by UE plugin while waiting for response")
             self._recv_buffer += chunk
 
@@ -150,9 +176,4 @@ class UnrealConnection:
     def close(self) -> None:
         """Close the connection."""
         with self._lock:
-            if self._sock is not None:
-                try:
-                    self._sock.close()
-                except OSError:
-                    pass
-                self._sock = None
+            self._drop_connection()

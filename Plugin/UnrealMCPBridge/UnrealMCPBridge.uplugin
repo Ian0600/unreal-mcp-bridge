@@ -32,6 +32,14 @@
     {
       "Name": "GameplayCameras",
       "Enabled": true
+    },
+    {
+      "Name": "Niagara",
+      "Enabled": true
+    },
+    {
+      "Name": "SequencerScripting",
+      "Enabled": true
     }
   ]
 }

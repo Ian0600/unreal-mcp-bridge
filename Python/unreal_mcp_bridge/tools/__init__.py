@@ -9,6 +9,12 @@ from .statetree import register_statetree_tools
 from .camerarig import register_camerarig_tools
 from .camvar import register_camvar_tools
 from .material import register_material_tools
+from .niagara import register_niagara_tools
+from .widget import register_widget_tools
+from .widget_anim import register_widget_anim_tools
+from .skeletalmesh import register_skeletalmesh_tools
+from .sequencer import register_sequencer_tools
+from .call import register_call_tools
 
 __all__ = [
     "register_editor_tools",
@@ -22,4 +28,10 @@ __all__ = [
     "register_camerarig_tools",
     "register_camvar_tools",
     "register_material_tools",
+    "register_niagara_tools",
+    "register_widget_tools",
+    "register_widget_anim_tools",
+    "register_skeletalmesh_tools",
+    "register_sequencer_tools",
+    "register_call_tools",
 ]

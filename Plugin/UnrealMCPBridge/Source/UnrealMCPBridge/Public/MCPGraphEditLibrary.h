@@ -91,6 +91,67 @@ public:
         UBlueprint* Blueprint,
         const FString& GraphName);
 
+    // Implements a Blueprint interface on the Blueprint (equivalent to Class Settings > Interfaces > Add).
+    // InterfaceClassPath is the interface's generated class path — a BP interface asset's class,
+    // e.g. "/Game/.../BPI_Foo.BPI_Foo_C", or a native "/Script/Module.UMyInterface". For interface
+    // functions that have return values (or output params), this creates their function graphs
+    // (Entry + Result nodes) which you then populate with nodes + ConnectPins. Returns true on success.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static bool ImplementInterface(UBlueprint* Blueprint, const FString& InterfaceClassPath);
+
+    // Adds a K2Node_MakeStruct for the struct at StructPath (e.g. a UserDefinedStruct
+    // "/Game/.../S_Foo.S_Foo", or a native "/Script/CoreUObject.Vector"). Each struct member
+    // becomes an input pin; for UserDefinedStructs those pin names carry a GUID suffix
+    // (e.g. "Velocity_12_ABC...") — fetch the real names via blueprint.get_graph_nodes before
+    // ConnectPins. The struct output pin is named after the struct. Returns the new node's name,
+    // or empty string on failure.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static FString AddMakeStructNode(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& StructPath,
+        int32 PosX,
+        int32 PosY);
+
+    // Adds a K2Node_Select (the data multiplexer: pick one of N option values by an Index). Starts as
+    // a wildcard 2-option select; wiring settles its types the way the editor does on a drag — connect a
+    // bool/int/enum to its "Index" pin and connect the "Return Value" output to a typed pin, then the
+    // option pins take that type. For a bool index the two options are "Option 0" (false) / "Option 1"
+    // (true); set their literals with SetPinDefaultValue. Returns the new node's name, or empty on failure.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static FString AddSelectNode(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        int32 PosX,
+        int32 PosY);
+
+    // Sets an (unconnected) input pin's literal default value, through the graph schema so enum/struct/
+    // object literals are validated and the node is notified (what typing into the pin in-editor does).
+    // Value is the pin's serialized form: for a UserDefinedEnum pin that is the raw enumerator name
+    // ("NewEnumerator0", "NewEnumerator1", ...), for numbers the number, for bools "true"/"false".
+    // Returns false if the graph/node/pin is not found or the schema rejects the value.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static bool SetPinDefaultValue(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& NodeName,
+        const FString& PinName,
+        const FString& Value);
+
+    // Sets an UObject-typed UPROPERTY directly on a graph node's C++ object, bypassing the script-access
+    // protection that blocks set_editor_property (some K2 nodes keep essential refs in a plain, non-Edit
+    // UPROPERTY — e.g. K2Node_SetCameraRigParameter::CameraRig). PropertyName is the C++ property name;
+    // ObjectPath is a package path to load (empty string clears it to null). After the write the node is
+    // reconstructed so its title/pins refresh the way the editor does. Returns false if the graph/node/
+    // property is not found, the property is not object-typed, or the object fails to load.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Graph", meta = (DevelopmentOnly))
+    static bool SetNodeObjectProperty(
+        UBlueprint* Blueprint,
+        const FString& GraphName,
+        const FString& NodeName,
+        const FString& PropertyName,
+        const FString& ObjectPath);
+
     // ---- AnimGraph (AnimBlueprint-only) ----
 
     // Adds a State Machine node to the named AnimGraph (an AnimBlueprint's main graph is a
@@ -128,6 +189,16 @@ public:
         const FString& BlendSpaceAssetPath,
         int32 PosX,
         int32 PosY);
+
+    // Rebuilds a blend space's interpolation data (triangulation / grid) from its current SampleData.
+    //
+    // Needed because UBlendSpace::PostEditChangeProperty does NOT resample: editing SampleData only
+    // empties GridSamples, and the rebuild lives in the blend space *editor UI*. So a blend space
+    // authored from script (set_editor_property on BlendParameters/SampleData) has samples but no
+    // interpolation data, and evaluates to the reference pose — the animation silently never plays.
+    // Call this once after writing the samples.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Anim", meta = (DevelopmentOnly))
+    static bool RebuildBlendSpace(UBlendSpace* BlendSpace);
 
     // Adds a plain (non-blend-space) SequencePlayer node inside StateName's bound graph, sets its
     // Sequence asset and loop flag, and wires its pose output to the state's Output Animation Pose
@@ -220,10 +291,70 @@ public:
         float Min,
         float Max);
 
+    // Enables/disables individual animation entries of a Pose Search Database (motion matching),
+    // matching entries whose animation asset name contains any of NameSubstrings. Returns the number
+    // of entries changed, or -1 if the database's entry array could not be reached.
+    //
+    // Why this is not reachable from plain Python: UPoseSearchDatabase::DatabaseAnimationAssets is a
+    // *private* plain UPROPERTY() — no EditAnywhere, no BlueprintReadWrite — so get/set_editor_property
+    // refuses it, and the per-entry bEnabled flag is editor-only data on the element struct. This walks
+    // the array through FProperty reflection, which ignores C++ access specifiers, and looks the two
+    // fields up by name ("AnimAsset", "bEnabled") so no PoseSearch module dependency is needed.
+    //
+    // Disabling an entry is how you take a clip out of the search pool without deleting it — the use
+    // case being a clip whose authored speed does not exist in your movement model, which motion
+    // matching will otherwise keep selecting (GASP's Transition_Run_to_Sprint sits at 500cm/s for its
+    // first 0.8s, so a character whose sprint is 510 matches its head far better than the 700cm/s loop).
+    UFUNCTION(BlueprintCallable, Category = "MCP|Asset", meta = (DevelopmentOnly))
+    static int32 SetPoseSearchDatabaseEntriesEnabled(
+        UObject* Database,
+        const TArray<FString>& NameSubstrings,
+        bool bEnabled);
+
+    // Lists a Pose Search Database's animation entries as "<enabled 0/1> <asset name>", in array
+    // order. Same reflection path as SetPoseSearchDatabaseEntriesEnabled — use it to check what a
+    // toggle actually did, since the entries are invisible to Python otherwise.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Asset", meta = (DevelopmentOnly))
+    static TArray<FString> ListPoseSearchDatabaseEntries(UObject* Database);
+
+    // Exposes a camera node property on a UCameraRigAsset as a blendable interface parameter —
+    // the scriptable equivalent of "expose" on a property in the camera rig editor.
+    //
+    // Why this is not reachable from plain Python: the parameter list lives in
+    // UBaseCameraObject::Interface, which has no editor-property access, so
+    // get/set_editor_property refuses it. Only a name in that list can be driven by a
+    // K2Node_SetCameraRigParameter; anything else throws "No such camera parameter: X" at
+    // runtime and the write is silently dropped.
+    //
+    // NodeClass is a short class name ("BoomArmCameraNode"), NodeIndex picks among multiple
+    // matches. The variable type is inferred from the property's F<Type>CameraParameter struct,
+    // so a caller cannot pair a parameter with the wrong type. Rebuilds the rig on success —
+    // the runtime's parameter definitions are produced by the build, not by the edit.
+    // Returns empty string on success, or a human-readable reason on failure.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Camera", meta = (DevelopmentOnly))
+    static FString ExposeCameraRigParameter(
+        class UCameraRigAsset* Rig,
+        const FString& ParameterName,
+        const FString& NodeClass,
+        const FString& PropertyName,
+        int32 NodeIndex = 0);
+
+    // Lists a rig's exposed blendable interface parameters as
+    // "Name|Type|TargetNode.TargetProperty" entries. The counterpart read for
+    // ExposeCameraRigParameter, and the way to check what a K2Node_SetCameraRigParameter may bind to.
+    UFUNCTION(BlueprintCallable, Category = "MCP|Camera", meta = (DevelopmentOnly))
+    static TArray<FString> ListCameraRigParameters(class UCameraRigAsset* Rig);
+
+    // GraphName may also be a full object path (contains '/' or ':'), which is the only way to name
+    // one specific nested graph — Blend Stack graph names repeat across nodes.
+    //
     // Resolves GraphName against Blueprint's top-level graphs, then (for AnimBlueprints) falls
     // back to nested AnimGraph graphs: state machine inner graphs, state bound graphs, and
-    // transition rule graphs. Public so other command handlers (e.g. blueprint.get_graph_nodes)
-    // can inspect nested anim graphs too. Not a UFUNCTION — C++-only, no Python/Blueprint exposure.
+    // transition rule graphs. Failing that it walks UEdGraphNode::GetSubGraphs() breadth-first,
+    // which is what reaches a Blend Stack graph inside a Motion Matching node
+    // (`AnimationBlendStackGraph_*`). Public so other command handlers (e.g.
+    // blueprint.get_graph_nodes) can inspect nested anim graphs too. Not a UFUNCTION — C++-only,
+    // no Python/Blueprint exposure.
     static UEdGraph* FindGraphByName(UBlueprint* BP, const FString& GraphName);
 
 private:

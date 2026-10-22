@@ -12,6 +12,9 @@
 #include "Materials/MaterialExpression.h"
 #include "Materials/MaterialExpressionNamedReroute.h"
 #include "Materials/MaterialExpressionComment.h"
+#include "Materials/MaterialExpressionGetMaterialAttributes.h"
+#include "Materials/MaterialExpressionSetMaterialAttributes.h"
+#include "Materials/MaterialAttributeDefinitionMap.h"
 #include "Materials/MaterialParameters.h"
 #include "SceneTypes.h"
 
@@ -211,6 +214,102 @@ namespace
         return (C && C->IsChildOf(UMaterialExpression::StaticClass())) ? C : nullptr;
     }
 
+    // ---------- Get/Set Material Attributes dynamic pins ----------
+
+    // Both nodes carry two parallel arrays that must stay in lockstep: the attribute GUID list and
+    // the pin array, whose slot 0 is the whole-MaterialAttributes passthrough. Engine code asserts
+    // on Outputs.Num() == AttributeGetTypes.Num() + 1 (MaterialExpressions.cpp) while the package
+    // loads, which makes a desynced node a landmine — it does not fail at the moment it is edited,
+    // it crashes the editor every time the asset is opened afterwards.
+    //
+    // Assigning AttributeGetTypes / AttributeSetTypes directly produces exactly that. The pin array
+    // is only resized by the PreEditChange/PostEditChangeProperty pair, which computes a delta
+    // against the PreEdit*Types snapshot; a scripted property write skips the PreEditChange that
+    // fills the snapshot, so the delta comes out wrong and the pin array never follows.
+    // CreateOrGet*Attribute updates both arrays together, so it is the only safe way in.
+
+    // Resolves a user-supplied attribute name through the engine's canonical name<->GUID table,
+    // rather than a hardcoded enum list that would rot as attributes are added.
+    bool ResolveMaterialAttribute(const FString& Name, FGuid& OutId, EMaterialProperty& OutProperty, FString& OutCanonicalName)
+    {
+        TArray<TPair<FString, FGuid>> NameToId;
+        FMaterialAttributeDefinitionMap::GetAttributeNameToIDList(NameToId);
+        for (const TPair<FString, FGuid>& Entry : NameToId)
+        {
+            if (Entry.Key.Equals(Name, ESearchCase::IgnoreCase))
+            {
+                OutId = Entry.Value;
+                OutProperty = FMaterialAttributeDefinitionMap::GetProperty(Entry.Value);
+                OutCanonicalName = Entry.Key;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Listed back on a name miss so the caller learns the vocabulary from the error itself.
+    FString KnownMaterialAttributeNames()
+    {
+        TArray<TPair<FString, FGuid>> NameToId;
+        FMaterialAttributeDefinitionMap::GetAttributeNameToIDList(NameToId);
+        TArray<FString> Names;
+        Names.Reserve(NameToId.Num());
+        for (const TPair<FString, FGuid>& Entry : NameToId)
+        {
+            Names.Add(Entry.Key);
+        }
+        Names.Sort();
+        return FString::Join(Names, TEXT(", "));
+    }
+
+    // Describes one node's attribute pins and reports the array-length invariant, so callers can
+    // tell a healthy node from one that will assert on the next load.
+    TSharedPtr<FJsonObject> DescribeAttributePins(UMaterialExpression* Expr, FMCPError& OutError)
+    {
+        const TArray<FGuid>* Types = nullptr;
+        int32 PinCount = 0;
+        const TCHAR* Kind = nullptr;
+
+        if (UMaterialExpressionGetMaterialAttributes* Get = Cast<UMaterialExpressionGetMaterialAttributes>(Expr))
+        {
+            Kind = TEXT("get");
+            Types = &Get->AttributeGetTypes;
+            PinCount = Get->GetOutputs().Num();
+        }
+        else if (UMaterialExpressionSetMaterialAttributes* Set = Cast<UMaterialExpressionSetMaterialAttributes>(Expr))
+        {
+            Kind = TEXT("set");
+            Types = &Set->AttributeSetTypes;
+            PinCount = Set->Inputs.Num();
+        }
+        else
+        {
+            MtlFail(OutError, FMCPError::InvalidParams,
+                TEXT("expression_guid does not reference a Get/Set Material Attributes node"));
+            return nullptr;
+        }
+
+        TArray<TSharedPtr<FJsonValue>> Pins;
+        for (int32 i = 0; i < Types->Num(); ++i)
+        {
+            const FGuid& Id = (*Types)[i];
+            auto Pin = MakeShared<FJsonObject>();
+            // Slot 0 is the passthrough, so the Nth attribute sits on pin N+1.
+            Pin->SetNumberField(TEXT("index"), i + 1);
+            Pin->SetStringField(TEXT("attribute"), FMaterialAttributeDefinitionMap::GetAttributeName(Id));
+            Pin->SetStringField(TEXT("attribute_id"), Id.ToString());
+            Pins.Add(MakeShared<FJsonValueObject>(Pin));
+        }
+
+        auto Result = MakeShared<FJsonObject>();
+        Result->SetStringField(TEXT("kind"), Kind);
+        Result->SetArrayField(TEXT("pins"), Pins);
+        Result->SetNumberField(TEXT("attribute_count"), Types->Num());
+        Result->SetNumberField(TEXT("pin_count"), PinCount);
+        Result->SetBoolField(TEXT("consistent"), PinCount == Types->Num() + 1);
+        return Result;
+    }
+
     // Comments live in a separate collection (GetEditorComments), not the expression array,
     // so they need their own guid resolver.
     UMaterialExpressionComment* ResolveComment(const FGraphHost& Host, const FString& GuidStr, FMCPError& OutError)
@@ -289,7 +388,11 @@ namespace
 
     // Generic reflection-based property write + change notification. Works on materials,
     // material instances and expression nodes alike.
-    bool SetPropertyByReflection(UObject* Obj, const FString& PropName, const FString& Value, FMCPError& OutError)
+    //
+    // Mtl-prefixed like the rest of this anonymous namespace: WidgetCommands.cpp declares its own
+    // SetPropertyByReflection inside namespace WidgetCmd, and under a unity build both land in the
+    // same translation unit — an unqualified call there would see this one too and be ambiguous.
+    bool MtlSetPropertyByReflection(UObject* Obj, const FString& PropName, const FString& Value, FMCPError& OutError)
     {
         FProperty* Prop = Obj->GetClass()->FindPropertyByName(FName(*PropName));
         if (!Prop)
@@ -748,7 +851,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 
             UMaterialExpression* Expr = ResolveExpression(Host, GuidStr, OutError);
             if (!Expr) return nullptr;
-            if (!SetPropertyByReflection(Expr, PropName, Value, OutError)) return nullptr;
+            if (!MtlSetPropertyByReflection(Expr, PropName, Value, OutError)) return nullptr;
             Host.AsObject()->MarkPackageDirty();
             return MtlOk();
         });
@@ -1033,6 +1136,87 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
         });
 
     // =====================================================================================
+    // GET / SET MATERIAL ATTRIBUTES DYNAMIC PINS
+    // =====================================================================================
+
+    // material.attribute_pin_list — report the attribute pins on a Get/Set Material Attributes node.
+    // "consistent" is the invariant the engine asserts on while loading the package: false means the
+    // node is already broken and will crash the editor the next time this asset is opened.
+    // Params: material_path OR function_path, expression_guid.
+    // Returns { kind, pins[{index, attribute, attribute_id}], attribute_count, pin_count, consistent }.
+    Registry.Register(TEXT("material.attribute_pin_list"),
+        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FGraphHost Host = LoadGraphHost(Params, OutError);
+            if (!Host.IsValid()) return nullptr;
+            FString GuidStr;
+            if (!RequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
+
+            UMaterialExpression* Expr = ResolveExpression(Host, GuidStr, OutError); if (!Expr) return nullptr;
+            return DescribeAttributePins(Expr, OutError);
+        });
+
+    // material.attribute_pin_add — add an attribute pin to a Get/Set Material Attributes node, or
+    // return the existing one if that attribute is already exposed (idempotent). Wire it afterwards
+    // with connect_expressions using the attribute name as the pin name.
+    //
+    // Never write AttributeGetTypes / AttributeSetTypes directly to do this: the pin array is
+    // resized from a PreEditChange snapshot that scripted property writes never fill, so the two
+    // arrays drift apart and the asset asserts on load from then on. This routes through the
+    // engine's CreateOrGet*Attribute, which updates both arrays as one operation.
+    //
+    // Params: material_path OR function_path, expression_guid, attribute (e.g. "BaseColor",
+    // "Specular", "Roughness" — case-insensitive; a miss lists the accepted names).
+    // Returns the same shape as attribute_pin_list plus { index, attribute } for the pin resolved.
+    Registry.Register(TEXT("material.attribute_pin_add"),
+        [](const TSharedPtr<FJsonObject>& Params, FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FGraphHost Host = LoadGraphHost(Params, OutError);
+            if (!Host.IsValid()) return nullptr;
+            FString GuidStr, AttrName;
+            if (!RequireString(Params, TEXT("expression_guid"), GuidStr, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("attribute"), AttrName, OutError)) return nullptr;
+
+            UMaterialExpression* Expr = ResolveExpression(Host, GuidStr, OutError); if (!Expr) return nullptr;
+
+            FGuid AttrId;
+            EMaterialProperty Property = MP_MAX;
+            FString Canonical;
+            if (!ResolveMaterialAttribute(AttrName, AttrId, Property, Canonical))
+            {
+                MtlFail(OutError, FMCPError::InvalidParams, FString::Printf(
+                    TEXT("unknown material attribute '%s'. known: %s"), *AttrName, *KnownMaterialAttributeNames()));
+                return nullptr;
+            }
+
+            int32 Index = INDEX_NONE;
+            if (UMaterialExpressionGetMaterialAttributes* Get = Cast<UMaterialExpressionGetMaterialAttributes>(Expr))
+            {
+                Get->Modify();
+                Index = Get->CreateOrGetOutputAttribute(Property);
+            }
+            else if (UMaterialExpressionSetMaterialAttributes* Set = Cast<UMaterialExpressionSetMaterialAttributes>(Expr))
+            {
+                Set->Modify();
+                Index = Set->CreateOrGetInputAttribute(Property);
+            }
+            else
+            {
+                MtlFail(OutError, FMCPError::InvalidParams,
+                    TEXT("expression_guid does not reference a Get/Set Material Attributes node"));
+                return nullptr;
+            }
+
+            Host.AsObject()->MarkPackageDirty();
+
+            TSharedPtr<FJsonObject> Result = DescribeAttributePins(Expr, OutError);
+            if (!Result) return nullptr;
+            Result->SetNumberField(TEXT("index"), Index);
+            Result->SetStringField(TEXT("attribute"), Canonical);
+            return Result;
+        });
+
+    // =====================================================================================
     // COMMENT BOXES (UMaterialExpressionComment)
     // =====================================================================================
 
@@ -1166,7 +1350,7 @@ void FMaterialCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             if (!RequireString(Params, TEXT("property"), PropName, OutError)) return nullptr;
             if (!Params->TryGetStringField(TEXT("value"), Value)) { MtlFail(OutError, FMCPError::InvalidParams, TEXT("value is required")); return nullptr; }
 
-            if (!SetPropertyByReflection(Obj, PropName, Value, OutError)) return nullptr;
+            if (!MtlSetPropertyByReflection(Obj, PropName, Value, OutError)) return nullptr;
             return MtlOk();
         });
 

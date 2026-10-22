@@ -16,6 +16,12 @@ from .tools import (
     register_camerarig_tools,
     register_camvar_tools,
     register_material_tools,
+    register_niagara_tools,
+    register_widget_tools,
+    register_widget_anim_tools,
+    register_skeletalmesh_tools,
+    register_sequencer_tools,
+    register_call_tools,
 )
 
 
@@ -36,6 +42,12 @@ def main() -> None:
     register_camerarig_tools(mcp, conn)
     register_camvar_tools(mcp, conn)
     register_material_tools(mcp, conn)
+    register_niagara_tools(mcp, conn)
+    register_widget_tools(mcp, conn)
+    register_widget_anim_tools(mcp, conn)
+    register_skeletalmesh_tools(mcp, conn)
+    register_sequencer_tools(mcp, conn)
+    register_call_tools(mcp, conn)
 
     try:
         mcp.run(transport="stdio")

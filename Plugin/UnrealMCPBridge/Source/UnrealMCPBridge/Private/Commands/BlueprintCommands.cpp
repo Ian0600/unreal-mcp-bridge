@@ -10,6 +10,8 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "K2Node_FunctionEntry.h"
+#include "K2Node_FunctionResult.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/Package.h"
 
@@ -312,6 +314,108 @@ void FBlueprintCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 
             TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
             Result->SetArrayField(TEXT("graphs"), AllGraphs);
+            return Result;
+        });
+
+    // blueprint.list_functions — inventory of a Blueprint's graphs: name, graph_type, node_count,
+    // and for function graphs the resolved input/output signature.
+    // Params: blueprint_path (required), graph_name (optional filter).
+    //
+    // get_graph_nodes answers the same question by dumping every node with every pin and every
+    // link, which on a real character Blueprint is orders of magnitude more than "what is in
+    // here" needs. This is the cheap first look that says which graph is worth dumping.
+    Registry.Register(TEXT("blueprint.list_functions"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FString BlueprintPath;
+            if (!UnrealMCPBridge::Json::RequireString(Params, TEXT("blueprint_path"), BlueprintPath, OutError))
+            {
+                return nullptr;
+            }
+
+            FString GraphNameFilter;
+            Params->TryGetStringField(TEXT("graph_name"), GraphNameFilter);
+
+            UBlueprint* BP = LoadObject<UBlueprint>(nullptr, *BlueprintPath);
+            if (!BP)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = FString::Printf(TEXT("Could not load Blueprint: %s"), *BlueprintPath);
+                return nullptr;
+            }
+
+            // Same display rule as blueprint.list_variables, so the two agree on type names.
+            auto TypeString = [](const FEdGraphPinType& PinType) -> FString
+            {
+                if (PinType.PinSubCategoryObject.IsValid()) return PinType.PinSubCategoryObject->GetName();
+                if (!PinType.PinSubCategory.IsNone())       return PinType.PinSubCategory.ToString();
+                return PinType.PinCategory.ToString();
+            };
+
+            // A function's signature lives on its entry/result nodes rather than on the graph, and
+            // the directions read backwards: the entry node's OUTPUT pins are the function's inputs,
+            // the result node's INPUT pins are its outputs. Exec pins are control flow, not part of
+            // the signature, so they are dropped.
+            auto CollectParams = [&TypeString](UEdGraphNode* Node, EEdGraphPinDirection Direction)
+            {
+                TArray<TSharedPtr<FJsonValue>> Params2;
+                if (!Node) return Params2;
+                for (UEdGraphPin* Pin : Node->Pins)
+                {
+                    if (!Pin || Pin->Direction != Direction) continue;
+                    if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec) continue;
+                    auto PinObj = MakeShared<FJsonObject>();
+                    PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+                    PinObj->SetStringField(TEXT("type"), TypeString(Pin->PinType));
+                    Params2.Add(MakeShared<FJsonValueObject>(PinObj));
+                }
+                return Params2;
+            };
+
+            TArray<TSharedPtr<FJsonValue>> Graphs;
+            // Generic over the container so the interface graphs below (a different array type on
+            // FBPInterfaceDescription) go through the same code.
+            auto AddGraphs = [&](const auto& InGraphs, const FString& Type)
+            {
+                for (UEdGraph* G : InGraphs)
+                {
+                    if (!G) continue;
+                    if (!GraphNameFilter.IsEmpty() && G->GetName() != GraphNameFilter) continue;
+
+                    auto GraphObj = MakeShared<FJsonObject>();
+                    GraphObj->SetStringField(TEXT("name"), G->GetName());
+                    GraphObj->SetStringField(TEXT("graph_type"), Type);
+                    GraphObj->SetNumberField(TEXT("node_count"), G->Nodes.Num());
+
+                    UK2Node_FunctionEntry*  Entry  = nullptr;
+                    UK2Node_FunctionResult* Result = nullptr;
+                    for (UEdGraphNode* N : G->Nodes)
+                    {
+                        if (!Entry)  Entry  = Cast<UK2Node_FunctionEntry>(N);
+                        if (!Result) Result = Cast<UK2Node_FunctionResult>(N);
+                    }
+                    // Only emitted when the graph actually has them — an event graph has neither,
+                    // and an empty array there would read as "takes nothing, returns nothing".
+                    if (Entry)  GraphObj->SetArrayField(TEXT("inputs"),  CollectParams(Entry, EGPD_Output));
+                    if (Result) GraphObj->SetArrayField(TEXT("outputs"), CollectParams(Result, EGPD_Input));
+
+                    Graphs.Add(MakeShared<FJsonValueObject>(GraphObj));
+                }
+            };
+
+            AddGraphs(BP->UbergraphPages, TEXT("ubergraph"));
+            AddGraphs(BP->FunctionGraphs, TEXT("function"));
+            AddGraphs(BP->MacroGraphs,    TEXT("macro"));
+
+            // Implemented interface functions live on ImplementedInterfaces, not FunctionGraphs, so
+            // walking the three top-level arrays alone reports them as absent.
+            for (const FBPInterfaceDescription& Interface : BP->ImplementedInterfaces)
+            {
+                AddGraphs(Interface.Graphs, TEXT("interface"));
+            }
+
+            TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+            Result->SetArrayField(TEXT("graphs"), Graphs);
             return Result;
         });
 }

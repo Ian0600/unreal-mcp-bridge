@@ -5,6 +5,9 @@
 #include "MCPGraphEditLibrary.h"
 #include "Dom/JsonObject.h"
 #include "Animation/AnimBlueprint.h"
+#include "Animation/Skeleton.h"
+#include "Engine/SkeletalMesh.h"
+#include "ScopedTransaction.h"
 
 namespace
 {
@@ -339,6 +342,57 @@ void FAnimGraphCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 
             auto Result = MakeShared<FJsonObject>();
             Result->SetBoolField(TEXT("removed"), true);
+            return Result;
+        });
+
+    // animgraph.set_preview_mesh — the AnimBP's preview mesh, what Preview Scene → "Apply To Asset"
+    // stores. Params: blueprint_path, mesh_path (empty string clears it). Returns { ok, previous, mesh }.
+    // Python has no setter for it. The mesh has to be on a skeleton compatible with the AnimBP's target
+    // skeleton — the editor refuses others too, and a mismatched preview shows the reference pose.
+    // Does not save — use asset.save.
+    Registry.Register(TEXT("animgraph.set_preview_mesh"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            UAnimBlueprint* AnimBP = LoadRequiredAnimBlueprint(Params, OutError);
+            if (!AnimBP) return nullptr;
+
+            FString MeshPath;
+            if (!Params->TryGetStringField(TEXT("mesh_path"), MeshPath))
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = TEXT("mesh_path is required (empty string clears the preview mesh)");
+                return nullptr;
+            }
+
+            USkeletalMesh* Mesh = nullptr;
+            if (!MeshPath.IsEmpty())
+            {
+                Mesh = LoadObject<USkeletalMesh>(nullptr, *MeshPath);
+                if (!Mesh)
+                {
+                    OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                    OutError.Message = FString::Printf(TEXT("Could not load skeletal mesh: %s"), *MeshPath);
+                    return nullptr;
+                }
+                const USkeleton* Target = AnimBP->TargetSkeleton;
+                if (Target && (!Mesh->GetSkeleton() || !Target->IsCompatibleForEditor(Mesh->GetSkeleton())))
+                {
+                    OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                    OutError.Message = FString::Printf(TEXT("%s uses skeleton %s, not compatible with the AnimBP's %s"),
+                        *Mesh->GetName(), *GetNameSafe(Mesh->GetSkeleton()), *Target->GetName());
+                    return nullptr;
+                }
+            }
+
+            const USkeletalMesh* Previous = AnimBP->GetPreviewMesh();
+            const FScopedTransaction Transaction(FText::FromString(TEXT("MCP: Set AnimBP Preview Mesh")));
+            AnimBP->Modify();
+            AnimBP->SetPreviewMesh(Mesh, /*bMarkAsDirty=*/true);
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetBoolField(TEXT("ok"), true);
+            Result->SetStringField(TEXT("previous"), Previous ? Previous->GetPathName() : FString());
+            Result->SetStringField(TEXT("mesh"), Mesh ? Mesh->GetPathName() : FString());
             return Result;
         });
 }

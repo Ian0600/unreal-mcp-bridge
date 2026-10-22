@@ -242,6 +242,54 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             return Result;
         });
 
+    // statetree.remove_transition — removes one transition from a state. Params: tree_path,
+    // from_state_id, transition_id (both from statetree.list_states). Returns { removed }.
+    //
+    // Identified by transition id rather than index: list_states reports ids, and an index would go
+    // stale the moment anything else on that state is edited — removing the wrong transition is silent
+    // and only shows up as the AI taking a path it should not.
+    Registry.Register(TEXT("statetree.remove_transition"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            UStateTree* Tree = LoadTree(Params, OutError); if (!Tree) return nullptr;
+            UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
+
+            FString FromId, TransitionId;
+            if (!RequireString(Params, TEXT("from_state_id"), FromId, OutError)) return nullptr;
+            if (!RequireString(Params, TEXT("transition_id"), TransitionId, OutError)) return nullptr;
+
+            FGuid FromGuid, TransGuid;
+            FGuid::Parse(FromId, FromGuid);
+            FGuid::Parse(TransitionId, TransGuid);
+
+            UStateTreeState* From = FindStateById(Ed, FromGuid);
+            if (!From)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = TEXT("from_state not found");
+                return nullptr;
+            }
+
+            const int32 Index = From->Transitions.IndexOfByPredicate(
+                [&TransGuid](const FStateTreeTransition& T) { return T.ID == TransGuid; });
+            if (Index == INDEX_NONE)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = FString::Printf(TEXT("transition %s not found on state %s"),
+                    *TransitionId, *From->Name.ToString());
+                return nullptr;
+            }
+
+            From->Modify();
+            From->Transitions.RemoveAt(Index);
+            Tree->MarkPackageDirty();
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetBoolField(TEXT("removed"), true);
+            Result->SetNumberField(TEXT("remaining"), From->Transitions.Num());
+            return Result;
+        });
+
     // statetree.add_binding — binds an output of source node to an input of target node.
     // Params: tree_path, source_node_id, source_path, target_node_id, target_path.
     Registry.Register(TEXT("statetree.add_binding"),
@@ -301,6 +349,169 @@ void FStateTreeCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 
             auto Result = MakeShared<FJsonObject>();
             Result->SetBoolField(TEXT("removed"), true);
+            return Result;
+        });
+
+    // statetree.list_states — dumps the state hierarchy. Params: tree_path. Returns { states: [...] },
+    // each entry { id, name, tasks[], enter_conditions[], transitions[], children[] }.
+    //
+    // 쓰기 명령만 있고 읽기가 없으면 트리를 **눈으로 열어봐야만** 편집할 수 있다. 상태 선택은 형제
+    // 순서가 결정하므로(먼저 조건을 만족하는 형제가 이긴다) 어디에 넣을지조차 순서를 모르면 정할 수
+    // 없고, 애셋 EditorData 는 protected 라 에디터 파이썬으로도 못 읽는다. 그 구멍을 메우는 명령이다.
+    Registry.Register(TEXT("statetree.list_states"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            UStateTree* Tree = LoadTree(Params, OutError); if (!Tree) return nullptr;
+            UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
+
+            // 노드 배열을 구조체 경로 문자열로 편다. 이름만으로는 같은 이름의 다른 모듈 노드와 구분이
+            // 안 되므로 add_task/add_condition 에 그대로 되먹일 수 있는 전체 경로로 낸다.
+            auto NodeNames = [](const TArray<FStateTreeEditorNode>& Nodes)
+            {
+                TArray<TSharedPtr<FJsonValue>> Out;
+                for (const FStateTreeEditorNode& N : Nodes)
+                {
+                    const UScriptStruct* Struct = N.Node.GetScriptStruct();
+                    Out.Add(MakeShared<FJsonValueString>(Struct ? Struct->GetPathName() : TEXT("(empty)")));
+                }
+                return Out;
+            };
+
+            // 재귀 람다. TFunction 으로 자기 자신을 잡아야 하위 상태까지 내려간다.
+            TFunction<TSharedPtr<FJsonObject>(UStateTreeState&)> Describe;
+            Describe = [&Describe, &NodeNames](UStateTreeState& State) -> TSharedPtr<FJsonObject>
+            {
+                auto Obj = MakeShared<FJsonObject>();
+                Obj->SetStringField(TEXT("id"), State.ID.ToString());
+                Obj->SetStringField(TEXT("name"), State.Name.ToString());
+
+                TArray<FStateTreeEditorNode> Tasks = State.Tasks;
+                if (State.SingleTask.Node.IsValid())
+                {
+                    // 단일 태스크는 배열 밖에 따로 산다. 여기서 합쳐 두지 않으면 태스크가 하나뿐인
+                    // 상태가 "태스크 없음"으로 보인다.
+                    Tasks.Add(State.SingleTask);
+                }
+                Obj->SetArrayField(TEXT("tasks"), NodeNames(Tasks));
+                Obj->SetArrayField(TEXT("enter_conditions"), NodeNames(State.EnterConditions));
+
+                TArray<TSharedPtr<FJsonValue>> Transitions;
+                for (const FStateTreeTransition& T : State.Transitions)
+                {
+                    auto TObj = MakeShared<FJsonObject>();
+                    TObj->SetStringField(TEXT("id"), T.ID.ToString());
+                    // EStateTreeTransitionTrigger 는 스코프드 enum(uint8 비트플래그)이라 숫자로 바로 못 넘긴다.
+                    TObj->SetNumberField(TEXT("trigger"), static_cast<double>(static_cast<uint8>(T.Trigger)));
+                    TObj->SetStringField(TEXT("target"), T.State.Name.ToString());
+                    TObj->SetNumberField(TEXT("condition_count"), T.Conditions.Num());
+                    Transitions.Add(MakeShared<FJsonValueObject>(TObj));
+                }
+                Obj->SetArrayField(TEXT("transitions"), Transitions);
+
+                TArray<TSharedPtr<FJsonValue>> Children;
+                for (UStateTreeState* Child : State.Children)
+                {
+                    if (Child)
+                    {
+                        Children.Add(MakeShared<FJsonValueObject>(Describe(*Child)));
+                    }
+                }
+                Obj->SetArrayField(TEXT("children"), Children);
+                return Obj;
+            };
+
+            TArray<TSharedPtr<FJsonValue>> Roots;
+            for (UStateTreeState* Sub : Ed->SubTrees)
+            {
+                if (Sub)
+                {
+                    Roots.Add(MakeShared<FJsonValueObject>(Describe(*Sub)));
+                }
+            }
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetArrayField(TEXT("states"), Roots);
+            return Result;
+        });
+
+    // statetree.move_state — reorders a state among its siblings, optionally reparenting it.
+    // Params: tree_path, state_id, index (0-based; <0 or past the end = last),
+    //         parent_state_id (optional; omit to keep the current parent, empty string = root subtree list).
+    // Returns { moved, parent, index }.
+    //
+    // add_state 는 AddChildState 라 **항상 끝에 붙는다.** 그런데 조건 없는 상태(Patrol 같은)가 앞에 있으면
+    // 뒤의 형제는 영원히 선택되지 않으므로, 새로 심은 상태는 대개 옮겨야 쓸모가 생긴다. 그 한 걸음 때문에
+    // 매번 에디터를 열어 드래그하게 두지 않으려고 있는 명령이다.
+    Registry.Register(TEXT("statetree.move_state"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            UStateTree* Tree = LoadTree(Params, OutError); if (!Tree) return nullptr;
+            UStateTreeEditorData* Ed = GetEditorData(Tree, OutError); if (!Ed) return nullptr;
+
+            FString StateId; if (!RequireString(Params, TEXT("state_id"), StateId, OutError)) return nullptr;
+            FGuid Guid; FGuid::Parse(StateId, Guid);
+            UStateTreeState* State = FindStateById(Ed, Guid);
+            if (!State) { OutError.Code = MCPProtocol::FMCPError::InvalidParams; OutError.Message = TEXT("state_id not found"); return nullptr; }
+
+            // 새 부모를 정한다. 필드를 아예 안 주면 지금 부모를 유지한다(순수 순서 변경) — 빈 문자열은
+            // "루트 서브트리로"라는 뜻이라 서로 다르다. add_state 의 parent_state_id 규칙과 같은 축이다.
+            const bool bReparent = Params->HasField(TEXT("parent_state_id"));
+            UStateTreeState* NewParent = State->Parent;
+            if (bReparent)
+            {
+                FString ParentId;
+                Params->TryGetStringField(TEXT("parent_state_id"), ParentId);
+                if (ParentId.IsEmpty())
+                {
+                    NewParent = nullptr;
+                }
+                else
+                {
+                    FGuid ParentGuid; FGuid::Parse(ParentId, ParentGuid);
+                    NewParent = FindStateById(Ed, ParentGuid);
+                    if (!NewParent) { OutError.Code = MCPProtocol::FMCPError::InvalidParams; OutError.Message = TEXT("parent_state_id not found"); return nullptr; }
+                }
+
+                // 자기 자신이나 자기 자손 밑으로 넣으면 계층이 고리가 되어 순회가 무한이 된다.
+                for (UStateTreeState* Ancestor = NewParent; Ancestor; Ancestor = Ancestor->Parent)
+                {
+                    if (Ancestor == State)
+                    {
+                        OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                        OutError.Message = TEXT("cannot move a state under itself or its own descendant");
+                        return nullptr;
+                    }
+                }
+            }
+
+            int32 Index = -1;
+            if (Params->HasTypedField<EJson::Number>(TEXT("index")))
+            {
+                Index = static_cast<int32>(Params->GetNumberField(TEXT("index")));
+            }
+
+            TArray<TObjectPtr<UStateTreeState>>& FromArray = State->Parent ? State->Parent->Children : Ed->SubTrees;
+            TArray<TObjectPtr<UStateTreeState>>& ToArray   = NewParent      ? NewParent->Children      : Ed->SubTrees;
+
+            Ed->Modify();
+            if (State->Parent) { State->Parent->Modify(); }
+            if (NewParent)     { NewParent->Modify(); }
+            State->Modify();
+
+            FromArray.Remove(State);
+
+            // 같은 배열 안에서 옮길 때는 제거 뒤 길이를 기준으로 자른다 — 제거 전 길이로 클램프하면
+            // "맨 뒤로" 요청이 범위를 벗어난다.
+            if (Index < 0 || Index > ToArray.Num()) { Index = ToArray.Num(); }
+            ToArray.Insert(State, Index);
+            State->Parent = NewParent;
+
+            Tree->MarkPackageDirty();
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetBoolField(TEXT("moved"), true);
+            Result->SetStringField(TEXT("parent"), NewParent ? NewParent->Name.ToString() : TEXT("(root)"));
+            Result->SetNumberField(TEXT("index"), Index);
             return Result;
         });
 

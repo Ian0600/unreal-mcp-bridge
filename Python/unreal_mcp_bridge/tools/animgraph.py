@@ -276,3 +276,15 @@ def register_animgraph_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
             "graph_name": graph_name,
             "node_name": node_name,
         })
+
+    @mcp.tool()
+    def animgraph_set_preview_mesh(blueprint_path: str, mesh_path: str) -> dict:
+        """Sets an AnimBlueprint's preview mesh (what Preview Scene → "Apply To Asset" stores; Python
+        has no setter). mesh_path "" clears it. The mesh must be on a skeleton compatible with the
+        AnimBP's target skeleton. Returns {"ok", "previous", "mesh"}. Does not save — call asset_save."""
+        if not blueprint_path:
+            raise ValueError("blueprint_path is required")
+        return conn.call("animgraph.set_preview_mesh", {
+            "blueprint_path": blueprint_path,
+            "mesh_path": mesh_path,
+        })
