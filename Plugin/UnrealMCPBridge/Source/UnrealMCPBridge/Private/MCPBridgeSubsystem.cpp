@@ -23,6 +23,11 @@
 #include "Commands/WidgetAnimCommands.h"
 #include "Commands/LevelIOCommands.h"
 #include "Commands/SequencerCommands.h"
+#include "Commands/SceneCommands.h"
+#include "Commands/AssetSearchCommands.h"
+#include "Commands/LevelDataCommands.h"
+#include "Commands/DataTableCommands.h"
+#include "Commands/DebugRunCommands.h"
 
 void UMCPBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -73,6 +78,11 @@ void UMCPBridgeSubsystem::StartListener()
         Handlers.Add(MakeShared<FSkeletalMeshCommandHandler>());
         Handlers.Add(MakeShared<FPhysicsAssetCommandHandler>());
         Handlers.Add(MakeShared<FSequencerCommandHandler>());
+        Handlers.Add(MakeShared<FSceneCommandHandler>());
+        Handlers.Add(MakeShared<FAssetSearchCommandHandler>());
+        Handlers.Add(MakeShared<FLevelDataCommandHandler>());
+        Handlers.Add(MakeShared<FDataTableCommandHandler>());
+        Handlers.Add(MakeShared<FDebugRunCommandHandler>());
 
         for (const TSharedPtr<IMCPCommandHandler>& Handler : Handlers)
         {

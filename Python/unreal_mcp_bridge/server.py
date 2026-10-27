@@ -21,6 +21,10 @@ from .tools import (
     register_widget_anim_tools,
     register_skeletalmesh_tools,
     register_sequencer_tools,
+    register_scene_tools,
+    register_asset_search_tools,
+    register_level_data_tools,
+    register_datatable_tools,
     register_call_tools,
 )
 
@@ -47,6 +51,10 @@ def main() -> None:
     register_widget_anim_tools(mcp, conn)
     register_skeletalmesh_tools(mcp, conn)
     register_sequencer_tools(mcp, conn)
+    register_scene_tools(mcp, conn)
+    register_asset_search_tools(mcp, conn)
+    register_level_data_tools(mcp, conn)
+    register_datatable_tools(mcp, conn)
     register_call_tools(mcp, conn)
 
     try:

@@ -79,6 +79,10 @@ public class UnrealMCPBridge : ModuleRules
             "LevelSequence",
             "MovieSceneTools",
             "SequencerScriptingEditor",
+            // nav.project_point / nav.test_path (UNavigationSystemV1, FPathFindingQuery).
+            "NavigationSystem",
+            // scene.capture_view writes png/jpg through FImageUtils + FImageView.
+            "ImageCore",
         });
     }
 }

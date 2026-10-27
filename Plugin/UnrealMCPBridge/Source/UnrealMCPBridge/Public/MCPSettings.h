@@ -44,6 +44,23 @@ public:
     UPROPERTY(EditAnywhere, config, Category="MCP")
     int32 MaxLineBytes = 16777216;
 
+    // scene.spawn_temp 가 임시로 놓아도 되는 블루프린트. 패키지 경로 접두사(/Game/Dev/Props/)나
+    // 정확한 애셋 경로(/Game/Dev/BP_Crate.BP_Crate)를 적는다. 비어 있으면 블루프린트는 전부 거절한다 —
+    // construction script 가 다른 레벨 액터를 만들거나 바꿀 수 있어서, 「임시」를 C++ 이 보장하려면
+    // 사람이 확인한 것만 열어야 한다. 메시 · 라이트 · 블록아웃은 이 목록과 상관없이 된다.
+    UPROPERTY(EditAnywhere, config, Category="MCP|Scene")
+    TArray<FString> TempSpawnBlueprintAllowList;
+
+    // scene.pose_character 의 preset 을 읽는 json 파일. 비우면 <Project>/Saved/MCPBridge/pose_presets.json.
+    // 상대 경로는 프로젝트 폴더 기준이다. 형식은 PROTOCOL.md 의 scene.pose_character 절.
+    UPROPERTY(EditAnywhere, config, Category="MCP|Scene")
+    FString PosePresetFile;
+
+    // scene.capture_view 가 파일을 써도 되는 폴더(절대 경로 또는 프로젝트 기준 상대 경로).
+    // <Project>/Saved 는 항상 허용된다. Content 아래를 넣으면 Perforce 에 없는 파일이 생기니 넣지 않는다.
+    UPROPERTY(EditAnywhere, config, Category="MCP|Scene")
+    TArray<FString> CaptureOutputRoots;
+
     virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
 
 #if WITH_EDITOR

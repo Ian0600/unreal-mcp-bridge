@@ -14,6 +14,10 @@ from .widget import register_widget_tools
 from .widget_anim import register_widget_anim_tools
 from .skeletalmesh import register_skeletalmesh_tools
 from .sequencer import register_sequencer_tools
+from .scene import register_scene_tools
+from .asset_search import register_asset_search_tools
+from .level_data import register_level_data_tools
+from .datatable import register_datatable_tools
 from .call import register_call_tools
 
 __all__ = [
@@ -33,5 +37,9 @@ __all__ = [
     "register_widget_anim_tools",
     "register_skeletalmesh_tools",
     "register_sequencer_tools",
+    "register_scene_tools",
+    "register_asset_search_tools",
+    "register_level_data_tools",
+    "register_datatable_tools",
     "register_call_tools",
 ]

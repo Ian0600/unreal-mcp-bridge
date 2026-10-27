@@ -83,7 +83,7 @@ These hold across the whole catalogue unless a method says otherwise.
 
 ## Method Catalogue
 
-151 methods across 13 families.
+Methods by family (the families added on 2026-10-27 are documented at the end).
 
 | Family | Count | Scope |
 |--------|-------|-------|
@@ -100,6 +100,12 @@ These hold across the whole catalogue unless a method says otherwise.
 | [`camerarig.*`](#camerarig) | 3 | Gameplay Camera System rigs |
 | [`camvar.*`](#camvar) | 4 | Camera variable collections |
 | [`widget.*`](#widget) | 52 | Widget Blueprint (UMG) trees, slots, bindings and animations |
+| [`scene.*`](#scene) | 8 | Photo tools: never-saved temp actors, posed characters, ground height, game-view capture, shot lists |
+| [`asset.*` search](#asset-search) | 3 | Name search, mesh bounds, animations for a skeleton |
+| [`level.*` data](#level-data) | 7 | Actor queries, saved placement, batch property writes with dry run, instanced arrays, dirty files, splines, volumes |
+| [`nav.*`](#nav) | 2 | Navmesh projection and path tests |
+| [`datatable.*`](#datatable) | 2 | Row reads and JSON reimport with a row diff |
+| [`pie.*` run](#pie-run), `automation.*` | 3 | Console commands in PIE, the captured editor log, automation tests |
 
 ---
 
@@ -723,3 +729,72 @@ A track has one channel per animatable number: `RenderOpacity` has a single chan
 { "method": "widget.anim_key_add",     "params": { "widget_path": "/Game/UI/WBP_Menu.WBP_Menu", "animation_name": "FadeIn", "widget_name": "RootPanel", "property": "RenderOpacity", "time": 0.4, "value": 1.0 } }
 { "method": "widget.compile",          "params": { "widget_path": "/Game/UI/WBP_Menu.WBP_Menu" } }
 ```
+
+---
+
+<a name="scene"></a>
+### scene.*
+
+The "temp" promise is enforced in C++: temp actors are `RF_Transient` with no external package (so even a World Partition map gets no `__ExternalActors__` file), nothing calls `Modify` on a real level actor, and nothing is saved. Every mutating command returns `level_dirty` (true when any package became dirty during the call), `dirtied_packages` and `map_dirty`. Every temp actor carries the tag `MCPTemp`; `scene.clear_temp` scans the world for it.
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| `scene.capture_view` | `location, look_at? or rotation?, fov? (60), width?/height? (1600x900), ortho_width?, path?, marks?, game_view? (true), warmup? (4), hide_actors?, respect_editor_hidden? (true), stream_textures? (true), stream_seconds? (2)` | `ok, path, file_size, width, height, location, rotation, fov, marks_px: [{name, x, y, in_view, behind_camera}], hidden_actor_count` | Renders a game view with a scene capture in the same call and returns once the file is on disk. `path` must be under `<Project>/Saved` (relative = under Saved) or a `CaptureOutputRoots` folder |
+| `scene.spawn_temp` | `asset? or size_m?, location?, rotation?, scale?, material? or color?, properties?, tag?, label?, snap_to_ground?, z_offset?, items?` | `actors: [{name, label, path, class, location, rotation, bounds, tags}], level_dirty, ...` | Never-saved actors: meshes, allow-listed actor Blueprints (`TempSpawnBlueprintAllowList`), `PointLight`/`SpotLight`/`RectLight`/`DirectionalLight`/`CameraActor`, or a blockout box (`size_m` in metres). `items` is all-or-nothing |
+| `scene.clear_temp` | `tag?` | `removed_count, removed, reverted_overrides, level_dirty, ...` | Removes temp actors (all or by tag) and reverts `temp_override` changes |
+| `scene.pose_character` | `meshes? or preset? (+ preset_file?), anim?, time? or fraction?, yaw_offset?, weapon?, socket?, weapon_location?, weapon_rotation?, location?, rotation?, tag?, label?, snap_to_ground?` | actor fields + `parts, anim, time, length, facing_yaw, yaw_offset, warnings, level_dirty, ...` | Multi-part character (first mesh leads, the rest use leader pose) frozen on one frame; editor animation update on, pose evaluated before returning. Presets come from a JSON file (`PosePresetFile`, default `Saved/MCPBridge/pose_presets.json`): `{"presets": {"Name": {"meshes": [...], "weapon": "...", "socket": "...", "yaw_offset": -90}}}` |
+| `scene.temp_override` | `actor, hide?, anim?, time? or fraction?, component?, tag?, revert?` | `actor, hidden, anim_overridden, time, tag, cleaned_dirty_flags, level_dirty, ...` | Borrows a real level actor: editor-temporary hide (never `bHidden`) and/or a frozen animation frame. Reverted by `revert`, `scene.clear_temp`, and automatically just before the actor's package is saved |
+| `scene.get_ground_height` | `points: [[x, y]], ignore? (["volumes", "temp"]; "roofs" = lowest), layer? (0 top, -1 lowest), top_z?, bottom_z?, include_layers? (true)` | `points: [{x, y, hit, z, actor, layers: [{z, normal_z, actor, actor_path, component}]}], layer` | Read-only. Visibility-channel trace straight down; each component counts once, so roof, floor and terrain are separate layers |
+| `scene.run_shots` | `shots: [{id, spawn?, pose?, override?, camera?, path?, settle_frames?, keep?}], settle_frames? (4), timeout_s? (60), on_fail? ("continue" or "stop")` | `job_id, total` | Starts a shot list worked on the core ticker, one step per editor frame; settle frames are real frames rendered into the capture. Each shot's temp actors are cleared after its capture unless `keep` |
+| `scene.shots_status` | `job_id` | `job_id, done, index, total, failed, elapsed_seconds, results: [{id, ok, path, capture, error, setup, seconds}]` | Read-only. Finished jobs are kept 10 minutes |
+
+<a name="asset-search"></a>
+### asset.* (search)
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| `asset.find` | `query? (space-separated words, all must match), class?, path? ("/Game"), max? (100), include_size?` | `assets: [{name, class, object_path, package_path, skeleton?, disk_size?}], total, truncated` | Read-only asset registry search; `class` includes subclasses |
+| `asset.bounds` | `asset or assets` | `bounds: [{asset, class, center, extent, size_m, min, max, sphere_radius, pivot_to_bottom} or {asset, error}]` | Static / skeletal mesh size (skeletal = reference pose) |
+| `asset.anims_for_skeleton` | `skeleton or mesh, classes? (["AnimSequence"]), query?, path?, max? (500)` | `skeleton, anims: [{name, class, object_path, skeleton, frames, frame_rate, length}], total, truncated` | Read-only; honours compatible skeletons |
+
+<a name="level-data"></a>
+### level.* (data authoring)
+
+Writes are saved level data: one `FScopedTransaction` per call (one undo step), the same property path rules as `object.*` (`A.B`, `A[2]`, component hops), and nothing is saved. Values are ImportText strings, numbers or bools; number and bool text is validated before import (ImportText alone would read `"abc"` as 0).
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| `level.query_actors` | `class?, exact_class?, folder?, label? (substring or * wildcard), tag?, sphere? {center, radius}, box? {min, max}, include_temp?, properties?, include_bounds?, max? (500)` | `actors: [{object_path, name, label, class, folder, location, rotation, external_package, file, distance?, bounds?, properties?}], total, truncated` | Read-only |
+| `level.actor_spawn` | `class or asset, location?, rotation?, scale?, label?, folder?, properties?, snap_to_ground?, z_offset?, items?, dry_run?` | `actors: [{..., external_package, file, bounds}], level_dirty, ...` or `dry_run, plan` | Saved placement; `dry_run` checks class and properties against the class defaults |
+| `level.actors_set_properties` | `changes: [{actor, properties}] or actors + properties, dry_run?` | `dry_run, changed_count, diff: [{actor, actor_path, property, old, new, changed}], level_dirty?, ...` | Every write is parsed before any is made |
+| `level.actor_add_instanced` | `actor, property, class, properties?, index?, dry_run?` | `actor, property, index, object_path, class, count, properties, level_dirty, ...` | Adds an instanced subobject to an array property (e.g. `TriggerActions`) |
+| `level.dirty_files` | `include_assets?` | `files: [{package, file, kind, exists_on_disk, read_only, p4, actor?, actor_class?}], counts` | Read-only. The map and `__ExternalActors__` / `__ExternalObjects__` files a save would write; `p4` is an add / edit / delete hint |
+| `level.spline_set_points` | `actor, points, component?, space? ("world"), closed_loop?, point_type?, dry_run?` | `actor, component, old_points, new_points, closed_loop, level_dirty, ...` | Marks the spline edited so a construction script keeps it |
+| `level.volume_set_extent` | `actor, extent or size_m, component?, dry_run?` | `actor, method, component, old_extent, new_extent, level_dirty, ...` | Box extent, sphere radius, capsule size, or brush-volume scale |
+
+<a name="nav"></a>
+### nav.*
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| `nav.project_point` | `points, extent? ([50, 50, 250]), world? ("editor" or "pie")` | `points: [{input, ok, location, distance}], nav_data` | Read-only |
+| `nav.test_path` | `start + end or pairs: [{start, end}], extent?, world?` | `paths: [{start, end, projected, ok, partial, length, points}], nav_data` | Read-only; both ends are projected first |
+
+<a name="datatable"></a>
+### datatable.*
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| `datatable.get_rows` | `table, rows?, columns?, max? (500)` | `table, row_struct, source_file, row_count, columns, rows: [{name, values}], missing_rows, unknown_columns, truncated` | Read-only; values are the table's export text |
+| `datatable.reimport` | `table, json_path?, dry_run? (true)` | `table, source_file, dry_run, applied, added, removed, changed: [{row, columns: [{column, old, new}]}], unchanged_count, problems` | Re-reads the JSON source through `UDataTable::CreateTableFromJSONString` (no modal dialogs); a JSON with no rows is refused. Not saved |
+
+There is no row write: tables are produced by Excel -> DataGen -> JSON, and a hand-written row would be overwritten by the next run.
+
+<a name="pie-run"></a>
+### pie.* (run and check), automation.*
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| `pie.exec_console` | `command, world? ("pie" while PIE runs, else "editor"), player? (0)` | `world, command, output, log_lines, log_cursor` | Runs through the PIE player's controller (Exec cheats, cheat manager) or the editor world |
+| `pie.read_log` | `since?, contains?, category?, verbosity?, max? (200)` | `lines: [{seq, category, verbosity, text}], next, dropped` | Read-only. The editor log captured by the bridge since startup (last 20000 lines) |
+| `automation.run_test` | `filter, max_tests? (50), latent_seconds? (5)` | `tests: [{name, ok, errors, warnings, seconds, messages, latent_timeout?}], passed, failed` | Runs tests whose full path starts with `filter`; tests that wait on frames report `latent_timeout` |

@@ -44,55 +44,11 @@ namespace
     constexpr int32 LevelIOMaxReportedActors = 200;
 
     // Helpers carry a LevelIO prefix rather than relying on the anonymous namespace: UBT's
-    // unity build merges command files into one translation unit, where a plain ReadVector3
-    // would collide with the next handler that wants the same name. Same reasoning as the
-    // shared helpers in CommandJsonHelpers.h.
-
-    // Reads an optional [x, y, z] number array. Leaves Out untouched when the field is
-    // absent; returns false only when present but malformed.
-    bool LevelIOReadVector3(
-        const TSharedPtr<FJsonObject>& Params,
-        const TCHAR* Field,
-        FVector& Out,
-        MCPProtocol::FMCPError& OutError)
-    {
-        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
-        if (!Params->TryGetArrayField(Field, Arr) || !Arr)
-        {
-            return true;
-        }
-
-        if (Arr->Num() != 3)
-        {
-            OutError.Code = MCPProtocol::FMCPError::InvalidParams;
-            OutError.Message = FString::Printf(TEXT("%s must be a 3-element number array"), Field);
-            return false;
-        }
-
-        Out.X = (*Arr)[0]->AsNumber();
-        Out.Y = (*Arr)[1]->AsNumber();
-        Out.Z = (*Arr)[2]->AsNumber();
-        return true;
-    }
-
-    // Reads an optional [pitch, yaw, roll] array — Unreal's FRotator ordering, as the
-    // protocol documents.
-    bool LevelIOReadRotator(
-        const TSharedPtr<FJsonObject>& Params,
-        const TCHAR* Field,
-        FRotator& Out,
-        MCPProtocol::FMCPError& OutError)
-    {
-        FVector AsVector(Out.Pitch, Out.Yaw, Out.Roll);
-        if (!LevelIOReadVector3(Params, Field, AsVector, OutError))
-        {
-            return false;
-        }
-        Out.Pitch = AsVector.X;
-        Out.Yaw   = AsVector.Y;
-        Out.Roll  = AsVector.Z;
-        return true;
-    }
+    // unity build merges command files into one translation unit, where two files' identically
+    // named helpers would collide. Same reasoning as the shared helpers in CommandJsonHelpers.h,
+    // which is where the [x, y, z] / [pitch, yaw, roll] readers now live.
+    using UnrealMCPBridge::Json::ReadVector3;
+    using UnrealMCPBridge::Json::ReadRotator;
 
     // True when the FBX exporter has geometry to write for this actor. Actors that carry
     // no mesh or brush geometry (pure logic actors, volumes, Blueprint actors whose
@@ -627,9 +583,9 @@ void FLevelIOCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             FRotator Rotation = FRotator::ZeroRotator;
             FVector  Scale    = FVector::OneVector;
 
-            if (!LevelIOReadVector3(Params, TEXT("location"), Location, OutError)) { return nullptr; }
-            if (!LevelIOReadRotator(Params, TEXT("rotation"), Rotation, OutError)) { return nullptr; }
-            if (!LevelIOReadVector3(Params, TEXT("scale"),    Scale,    OutError)) { return nullptr; }
+            if (!ReadVector3(Params, TEXT("location"), Location, OutError)) { return nullptr; }
+            if (!ReadRotator(Params, TEXT("rotation"), Rotation, OutError)) { return nullptr; }
+            if (!ReadVector3(Params, TEXT("scale"),    Scale,    OutError)) { return nullptr; }
 
             if (!GEditor)
             {

@@ -32,6 +32,55 @@ namespace UnrealMCPBridge::Json
     }
 
     /**
+     * Reads an optional [x, y, z] number array. Leaves Out untouched when the field is absent;
+     * returns false (with OutError) only when it is present but malformed.
+     */
+    inline bool ReadVector3(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FVector& Out, MCPProtocol::FMCPError& OutError)
+    {
+        const TArray<TSharedPtr<FJsonValue>>* Arr = nullptr;
+        if (!Params.IsValid() || !Params->TryGetArrayField(Field, Arr) || !Arr)
+        {
+            return true;
+        }
+
+        if (Arr->Num() != 3)
+        {
+            OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+            OutError.Message = FString::Printf(TEXT("%s must be a 3-element number array"), Field);
+            return false;
+        }
+
+        Out.X = (*Arr)[0]->AsNumber();
+        Out.Y = (*Arr)[1]->AsNumber();
+        Out.Z = (*Arr)[2]->AsNumber();
+        return true;
+    }
+
+    /** Reads an optional [pitch, yaw, roll] array — Unreal's FRotator ordering, as the protocol documents. */
+    inline bool ReadRotator(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FRotator& Out, MCPProtocol::FMCPError& OutError)
+    {
+        FVector AsVector(Out.Pitch, Out.Yaw, Out.Roll);
+        if (!ReadVector3(Params, Field, AsVector, OutError))
+        {
+            return false;
+        }
+        Out.Pitch = AsVector.X;
+        Out.Yaw   = AsVector.Y;
+        Out.Roll  = AsVector.Z;
+        return true;
+    }
+
+    /** [pitch, yaw, roll] JSON array, the inverse of ReadRotator. */
+    inline TSharedPtr<FJsonValue> MakeRotatorJsonArray(const FRotator& R)
+    {
+        TArray<TSharedPtr<FJsonValue>> Arr;
+        Arr.Add(MakeShared<FJsonValueNumber>(R.Pitch));
+        Arr.Add(MakeShared<FJsonValueNumber>(R.Yaw));
+        Arr.Add(MakeShared<FJsonValueNumber>(R.Roll));
+        return MakeShared<FJsonValueArray>(Arr);
+    }
+
+    /**
      * Builds a JSON object representing a single actor.
      * Fields: "name" (string), "class" (string), "location" ([x,y,z] number array).
      */
