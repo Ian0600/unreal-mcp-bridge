@@ -1,5 +1,6 @@
 #include "Commands/SequencerCommands.h"
 #include "Commands/CommandJsonHelpers.h"
+#include "Commands/SequencerHelpers.h"
 #include "MCPCommandRegistry.h"
 #include "MCPProtocol.h"
 #include "Dom/JsonObject.h"

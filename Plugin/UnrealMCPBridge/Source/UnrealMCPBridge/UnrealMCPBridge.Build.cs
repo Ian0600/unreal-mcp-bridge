@@ -83,6 +83,8 @@ public class UnrealMCPBridge : ModuleRules
             "NavigationSystem",
             // scene.capture_view writes png/jpg through FImageUtils + FImageView.
             "ImageCore",
+            // sequence.capture_frame reads the cine camera's horizontal field of view.
+            "CinematicCamera",
         });
     }
 }

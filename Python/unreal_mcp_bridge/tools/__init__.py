@@ -18,6 +18,7 @@ from .scene import register_scene_tools
 from .asset_search import register_asset_search_tools
 from .level_data import register_level_data_tools
 from .datatable import register_datatable_tools
+from .sequence import register_sequence_tools
 from .call import register_call_tools
 
 __all__ = [
@@ -41,5 +42,6 @@ __all__ = [
     "register_asset_search_tools",
     "register_level_data_tools",
     "register_datatable_tools",
+    "register_sequence_tools",
     "register_call_tools",
 ]

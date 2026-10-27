@@ -106,6 +106,7 @@ Methods by family (the families added on 2026-10-27 are documented at the end).
 | [`nav.*`](#nav) | 2 | Navmesh projection and path tests |
 | [`datatable.*`](#datatable) | 2 | Row reads and JSON reimport with a row diff |
 | [`pie.*` run](#pie-run), `automation.*` | 3 | Console commands in PIE, the captured editor log, automation tests |
+| [`sequence.*`](#sequence) | 5 | Transient Level Sequences for a shot: tracks, transform keys, one-frame capture |
 
 ---
 
@@ -798,3 +799,16 @@ There is no row write: tables are produced by Excel -> DataGen -> JSON, and a ha
 | `pie.exec_console` | `command, world? ("pie" while PIE runs, else "editor"), player? (0)` | `world, command, output, log_lines, log_cursor` | Runs through the PIE player's controller (Exec cheats, cheat manager) or the editor world |
 | `pie.read_log` | `since?, contains?, category?, verbosity?, max? (200)` | `lines: [{seq, category, verbosity, text}], next, dropped` | Read-only. The editor log captured by the bridge since startup (last 20000 lines) |
 | `automation.run_test` | `filter, max_tests? (50), latent_seconds? (5)` | `tests: [{name, ok, errors, warnings, seconds, messages, latent_timeout?}], passed, failed` | Runs tests whose full path starts with `filter`; tests that wait on frames report `latent_timeout` |
+
+<a name="sequence"></a>
+### sequence.*
+
+Builds a shot as a Level Sequence and photographs one frame of it, without opening Sequencer. `sequence.create` makes a transient sequence (never in Content); the other commands also work on saved sequence assets, which then become dirty (saving is `asset.save` after approval). Frames are display frames (the timeline numbers); `time` is seconds.
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| `sequence.create` | `name? ("MCPSequence"), fps? (30), duration? (5 s)` | `sequence_path, transient, display_rate, playback_start, playback_end` | Transient sequence kept alive by the bridge until `sequence.discard` or editor exit |
+| `sequence.add_track` | `sequence_path, kind ("transform" or "animation" or "camera_cut"), binding? or actor? or spawn?, name?, anim?, row?, start_frame? or start_time?, location?, rotation?, scale?; camera_cut: camera? or camera_actor? or camera_spawn?, camera_name?` | `sequence_path, kind, binding, binding_guid, binding_how, track, section_start, warnings?` | `actor` binds a level actor as a possessable (channel defaults = its current transform); `spawn` goes through `sequencer.add_spawnable` |
+| `sequence.set_keys` | `sequence_path, binding, keys: [{frame or time, location?, rotation?, scale?}], interpolation? ("cubic", "linear", "constant")` | `binding, keys_added, key_count, extended, playback_end` | Transform keys; keys past the end extend the playback range |
+| `sequence.capture_frame` | `sequence_path, frame? or time?, camera? or location + look_at?/rotation? + fov?, width?, height?, path?, marks?, warmup?, game_view?, hide_actors?` | `scene.capture_view` result + `frame, camera: {binding, location, rotation, fov}, level_dirty, dirtied_packages, map_dirty` | Evaluates the frame with a transient player (state restored, spawnables removed afterwards) and renders through `scene.capture_view`; camera = `camera` binding, else the explicit `location`, else the active camera cut |
+| `sequence.discard` | `sequence_path` | `discarded` | Transient sequences only |

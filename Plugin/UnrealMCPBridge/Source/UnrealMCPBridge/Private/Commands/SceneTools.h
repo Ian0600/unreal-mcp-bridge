@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
 #include "MCPProtocol.h"
+#include "UObject/WeakObjectPtr.h"
 
 class AActor;
 class UPrimitiveComponent;

@@ -25,6 +25,7 @@ from .tools import (
     register_asset_search_tools,
     register_level_data_tools,
     register_datatable_tools,
+    register_sequence_tools,
     register_call_tools,
 )
 
@@ -55,6 +56,7 @@ def main() -> None:
     register_asset_search_tools(mcp, conn)
     register_level_data_tools(mcp, conn)
     register_datatable_tools(mcp, conn)
+    register_sequence_tools(mcp, conn)
     register_call_tools(mcp, conn)
 
     try:
