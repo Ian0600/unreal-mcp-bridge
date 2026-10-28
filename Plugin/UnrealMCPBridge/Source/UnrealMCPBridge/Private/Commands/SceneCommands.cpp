@@ -80,6 +80,44 @@ namespace UnrealMCPBridge::Scene
         return World;
     }
 
+    UWorld* ResolveWorld(const TSharedPtr<FJsonObject>& Params, EDefaultWorld Default, bool& bOutIsPie, MCPProtocol::FMCPError& OutError)
+    {
+        FString Which;
+        if (Params.IsValid())
+        {
+            Params->TryGetStringField(TEXT("world"), Which);
+        }
+        UWorld* PlayWorld = GEditor ? GEditor->PlayWorld.Get() : nullptr;
+        if (Which.IsEmpty())
+        {
+            bOutIsPie = Default == EDefaultWorld::PieIfRunning && PlayWorld != nullptr;
+        }
+        else if (Which.Equals(TEXT("pie"), ESearchCase::IgnoreCase))
+        {
+            bOutIsPie = true;
+        }
+        else if (Which.Equals(TEXT("editor"), ESearchCase::IgnoreCase))
+        {
+            bOutIsPie = false;
+        }
+        else
+        {
+            OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+            OutError.Message = FString::Printf(TEXT("world must be \"pie\" or \"editor\", not \"%s\""), *Which);
+            return nullptr;
+        }
+        if (bOutIsPie)
+        {
+            if (!PlayWorld)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = TEXT("world=pie but PIE is not running (pie.start first)");
+            }
+            return PlayWorld;
+        }
+        return GetEditorWorld(OutError);
+    }
+
     FDirtySnapshot SnapshotDirtyPackages()
     {
         FDirtySnapshot Snapshot;

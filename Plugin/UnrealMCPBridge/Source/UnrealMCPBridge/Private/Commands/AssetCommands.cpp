@@ -9,7 +9,9 @@
 #include "EditorUtilityLibrary.h"
 #include "Editor.h"
 #include "HAL/FileManager.h"
+#include "Containers/Ticker.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "UObject/ObjectRedirector.h"
 #include "UObject/Package.h"
 #include "UObject/SavePackage.h"
@@ -44,6 +46,63 @@ namespace
             return TEXT("read-only (check it out in P4 first)");
         }
         return FString();
+    }
+
+    // Deferred asset.save results by job number (GameThread only: handlers and core tickers).
+    int32& SaveJobCounter()
+    {
+        static int32 Counter = 0;
+        return Counter;
+    }
+
+    TMap<int32, TSharedPtr<FJsonObject>>& SaveJobs()
+    {
+        static TMap<int32, TSharedPtr<FJsonObject>> Jobs;
+        return Jobs;
+    }
+
+    // Saves each path and reports the file state, so the caller learns "check it out first"
+    // instead of a bare false. A read-only file is not attempted: the editor would either fail
+    // or raise a checkout dialog that blocks the GameThread.
+    TSharedPtr<FJsonObject> SaveAssets(const TArray<FString>& Paths)
+    {
+        bool bAllSaved = true;
+        TArray<TSharedPtr<FJsonValue>> Results;
+        for (const FString& Path : Paths)
+        {
+            const FString PackageName = FPackageName::ObjectPathToPackageName(Path);
+            FString File;
+            const bool bExists = FPackageName::DoesPackageExist(PackageName, &File);
+            const bool bReadOnly = bExists && IFileManager::Get().IsReadOnly(*File);
+
+            auto Entry = MakeShared<FJsonObject>();
+            Entry->SetStringField(TEXT("path"), Path);
+            Entry->SetStringField(TEXT("file"), bExists ? FPaths::ConvertRelativePathToFull(File) : FString());
+            Entry->SetBoolField(TEXT("read_only"), bReadOnly);
+            Entry->SetStringField(TEXT("p4"), !bExists ? TEXT("add") : (bReadOnly ? TEXT("edit") : TEXT("")));
+
+            bool bSaved = false;
+            if (bReadOnly)
+            {
+                Entry->SetStringField(TEXT("error"), TEXT("read-only - p4 edit the file first"));
+            }
+            else
+            {
+                bSaved = UEditorAssetLibrary::SaveAsset(Path, /*bOnlyIfIsDirty=*/false);
+                if (!bSaved)
+                {
+                    Entry->SetStringField(TEXT("error"), TEXT("save failed - see the log (LogSavePackage)"));
+                }
+            }
+            Entry->SetBoolField(TEXT("saved"), bSaved);
+            bAllSaved &= bSaved;
+            Results.Add(MakeShared<FJsonValueObject>(Entry));
+        }
+
+        auto Result = MakeShared<FJsonObject>();
+        Result->SetBoolField(TEXT("saved"), bAllSaved);
+        Result->SetArrayField(TEXT("results"), Results);
+        return Result;
     }
 }
 
@@ -130,30 +189,85 @@ void FAssetCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             return Result;
         });
 
-    // asset.save — saves an asset package to disk
+    // asset.save — saves asset packages to disk.
+    // Params: object_path (string) or paths (array) — one is required; deferred (bool, default
+    // false): save on the next editor tick instead of inside this request, and return a job to
+    // read with asset.save_result. Deferring keeps the save out of whatever the request runs inside
+    // (a tool that just compiled or edited the asset, a modal); scripts used to defer it by hand.
+    // Read-only files are not attempted — Perforce has not checked them out.
+    // Returns { saved (all ok), results: [{path, saved, read_only, p4 ("edit" = check out first,
+    // "add" = new file, "" = fine), file, error}] } or, deferred, { job, queued }.
     Registry.Register(TEXT("asset.save"),
         [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
-            if (!Params.IsValid())
+            TArray<FString> Paths;
+            if (Params.IsValid())
+            {
+                FString ObjectPath;
+                if (Params->TryGetStringField(TEXT("object_path"), ObjectPath) && !ObjectPath.IsEmpty())
+                {
+                    Paths.Add(ObjectPath);
+                }
+                const TArray<TSharedPtr<FJsonValue>>* PathValues = nullptr;
+                if (Params->TryGetArrayField(TEXT("paths"), PathValues) && PathValues)
+                {
+                    for (const TSharedPtr<FJsonValue>& Value : *PathValues)
+                    {
+                        if (!Value->AsString().IsEmpty()) { Paths.Add(Value->AsString()); }
+                    }
+                }
+            }
+            if (Paths.Num() == 0)
             {
                 OutError.Code = MCPProtocol::FMCPError::InvalidParams;
-                OutError.Message = TEXT("params object is required");
+                OutError.Message = TEXT("object_path or paths is required");
                 return nullptr;
             }
+            bool bDeferred = false;
+            Params->TryGetBoolField(TEXT("deferred"), bDeferred);
 
-            FString ObjectPath;
-            if (!Params->TryGetStringField(TEXT("object_path"), ObjectPath) || ObjectPath.IsEmpty())
+            if (!bDeferred)
             {
-                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
-                OutError.Message = TEXT("object_path is required and must be non-empty");
-                return nullptr;
+                return SaveAssets(Paths);
             }
 
-            // SaveAsset expects a package path (without the asset name after the last dot)
-            const bool bSaved = UEditorAssetLibrary::SaveAsset(ObjectPath, /*bOnlyIfIsDirty=*/false);
+            const int32 Job = ++SaveJobCounter();
+            SaveJobs().Add(Job, nullptr);
+            FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Job, Paths](float)
+            {
+                SaveJobs().Add(Job, SaveAssets(Paths));
+                return false;   // run once
+            }));
 
             auto Result = MakeShared<FJsonObject>();
-            Result->SetBoolField(TEXT("saved"), bSaved);
+            Result->SetNumberField(TEXT("job"), Job);
+            Result->SetBoolField(TEXT("queued"), true);
+            return Result;
+        });
+
+    // asset.save_result — the outcome of a deferred asset.save. Params: job (required).
+    // Returns { job, done } and, once done, the same fields asset.save returns.
+    Registry.Register(TEXT("asset.save_result"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            double JobNumber = 0.0;
+            if (!Params.IsValid() || !Params->TryGetNumberField(TEXT("job"), JobNumber))
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = TEXT("job is required");
+                return nullptr;
+            }
+            const int32 Job = static_cast<int32>(JobNumber);
+            const TSharedPtr<FJsonObject>* Found = SaveJobs().Find(Job);
+            if (!Found)
+            {
+                OutError.Code = MCPProtocol::FMCPError::InvalidParams;
+                OutError.Message = FString::Printf(TEXT("No save job %d"), Job);
+                return nullptr;
+            }
+            TSharedPtr<FJsonObject> Result = Found->IsValid() ? MakeShared<FJsonObject>(**Found) : MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("job"), Job);
+            Result->SetBoolField(TEXT("done"), Found->IsValid());
             return Result;
         });
 

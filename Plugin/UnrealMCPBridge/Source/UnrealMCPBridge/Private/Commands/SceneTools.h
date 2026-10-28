@@ -23,6 +23,20 @@ namespace UnrealMCPBridge::Scene
     /** The editor world, or null with OutError set. PIE does not change which world this is. */
     UWorld* GetEditorWorld(MCPProtocol::FMCPError& OutError);
 
+    /** What ResolveWorld picks when the caller gives no "world" param. */
+    enum class EDefaultWorld : uint8
+    {
+        Editor,         // edit-time tools (nav checks, placement)
+        PieIfRunning,   // runtime tools (console, traces, player): PIE when it runs, else the editor world
+    };
+
+    /**
+     * The world a command acts on, from Params' "world" ("pie" / "editor"). One rule for every
+     * command that accepts world — pie.exec_console, nav.*, debug.* used to each read it their own way.
+     * Null with OutError set when PIE is asked for but not running. bOutIsPie says which one came back.
+     */
+    UWorld* ResolveWorld(const TSharedPtr<FJsonObject>& Params, EDefaultWorld Default, bool& bOutIsPie, MCPProtocol::FMCPError& OutError);
+
     /** Names of the packages that were dirty when the snapshot was taken. */
     struct FDirtySnapshot
     {

@@ -1,14 +1,41 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from fastmcp import FastMCP
 
+from .. import __version__
 from ..connection import UnrealConnection
+
+
+def _wrapped_methods() -> set[str]:
+    """Plugin methods some tool in this package calls by name (conn.call("x.y", ...))."""
+    pattern = re.compile(r'conn\.call\(\s*"([a-z_]+\.[a-z_]+)"')
+    methods: set[str] = set()
+    for source in Path(__file__).parent.glob("*.py"):
+        methods.update(pattern.findall(source.read_text(encoding="utf-8")))
+    return methods
 
 
 def register_editor_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
     @mcp.tool()
     def editor_get_status() -> dict:
-        return conn.call("editor.get_status")
+        """Current level, actor counts, whether PIE runs, and whether this MCP server is current.
+
+        Returns the plugin's fields plus server_version, server_path (the folder this server runs
+        from - it must be the workspace's unreal-mcp-bridge/Python, installed with pip install -e)
+        and server_missing: plugin commands no tool of this server wraps. A long server_missing list
+        (pie.exec_console, pie.status, ...) means the server is an old copy: point pip at the workspace
+        folder and restart the Claude session. A few entries are normal (call them with unreal_call).
+        The full command list is left out to keep the reply short (command_count stays)."""
+        status = conn.call("editor.get_status")
+        commands = status.pop("commands", None)
+        status["server_version"] = __version__
+        status["server_path"] = str(Path(__file__).resolve().parents[2])
+        if commands is not None:
+            status["server_missing"] = sorted(set(commands) - _wrapped_methods())
+        return status
 
     @mcp.tool()
     def editor_list_actors(

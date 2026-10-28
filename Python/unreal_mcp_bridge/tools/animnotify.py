@@ -7,19 +7,27 @@ from ..connection import UnrealConnection
 
 def register_animnotify_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
     @mcp.tool()
-    def animnotify_list(animation_path: str, notify_class: str = "") -> dict:
+    def animnotify_list(animation_path: str, notify_class: str = "", include_properties: bool = False) -> dict:
         """Lists the notify events on an animation asset (sequence or montage).
 
         notify_class optionally filters by class name or path and matches subclasses, e.g.
         "AnimNotifyState_MotionWarping" also returns project subclasses of it.
 
-        Returns {"notifies": [{"index", "class", "start_time", "duration", "track"}]}. The index is
+        "name" is the NotifyName stored when the notify was created - a cached copy that does not
+        follow later edits (a sound notify can still say "PostSound (no event)" after its Wwise event
+        was set). "label" is what the notify reports now (the Persona timeline text).
+        include_properties adds "properties" (every editable property that differs from the notify
+        class default: Wwise event, Niagara system, socket ...) - judge "is the sound set" from these.
+
+        Returns {"notifies": [{"index", "class", "name", "label", "start_time", "duration", "track"}]}. The index is
         what statetree-style edits need — pass it to animnotify_set_window."""
         if not animation_path:
             raise ValueError("animation_path is required")
         params: dict = {"animation_path": animation_path}
         if notify_class:
             params["notify_class"] = notify_class
+        if include_properties:
+            params["include_properties"] = True
         return conn.call("animnotify.list", params)
 
     @mcp.tool()

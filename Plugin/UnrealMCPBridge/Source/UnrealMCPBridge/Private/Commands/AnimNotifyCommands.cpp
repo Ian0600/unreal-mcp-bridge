@@ -1,5 +1,6 @@
 #include "Commands/AnimNotifyCommands.h"
 #include "Commands/CommandJsonHelpers.h"
+#include "Commands/CommandReflectionHelpers.h"
 #include "MCPCommandRegistry.h"
 #include "MCPProtocol.h"
 #include "Dom/JsonObject.h"
@@ -177,13 +178,19 @@ namespace
 void FAnimNotifyCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
     // animnotify.list — lists notify events on an animation. Params: animation_path,
-    // notify_class (optional filter, class name or path; matches subclasses too).
-    // Returns { notifies: [ { index, class, start_time, duration, track } ] }.
+    // notify_class (optional filter, class name or path; matches subclasses too),
+    // include_properties (bool, default false).
+    // Returns { notifies: [ { index, class, name, label, start_time, duration, track } ] }.
+    // name is the stored NotifyName (a cached copy — stale after the notify is edited), label is
+    // the notify's live GetNotifyName (what the Persona timeline shows). With include_properties
+    // each entry also gets properties ({ name: value } for every editable property whose value
+    // differs from the notify class's defaults: the Wwise event, Niagara system, socket ...).
     Registry.Register(TEXT("animnotify.list"),
         [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
             UAnimSequenceBase* Anim = LoadAnim(Params, OutError); if (!Anim) return nullptr;
             FString ClassFilter; Params->TryGetStringField(TEXT("notify_class"), ClassFilter);
+            bool bIncludeProperties = false; Params->TryGetBoolField(TEXT("include_properties"), bIncludeProperties);
 
             TArray<TSharedPtr<FJsonValue>> Out;
             for (int32 Index = 0; Index < Anim->Notifies.Num(); ++Index)
@@ -196,10 +203,42 @@ void FAnimNotifyCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 auto Entry = MakeShared<FJsonObject>();
                 Entry->SetNumberField(TEXT("index"), Index);
                 Entry->SetStringField(TEXT("class"), EventClassName(Event));
-                Entry->SetStringField(TEXT("name"), Event.NotifyName.ToString());   // 이름 노티(class "(none)")를 가려 보려고
+                // name = the NotifyName stored on the event when it was created or renamed — a cached
+                // copy that does not follow later edits (a sound notify keeps "PostSound (no event)"
+                // after its event is set, 2026-10-28). label = what the notify reports now. 이름 노티
+                // (class "(none)")는 label 이 비고 name 이 그 이름이다.
+                Entry->SetStringField(TEXT("name"), Event.NotifyName.ToString());
+                FString Label;
+                if (Event.Notify) { Label = Event.Notify->GetNotifyName(); }
+                else if (Event.NotifyStateClass) { Label = Event.NotifyStateClass->GetNotifyName(); }
+                Entry->SetStringField(TEXT("label"), Label);
                 Entry->SetNumberField(TEXT("start_time"), Event.GetTriggerTime());
                 Entry->SetNumberField(TEXT("duration"), Event.GetDuration());
                 Entry->SetNumberField(TEXT("track"), Event.TrackIndex);
+                if (bIncludeProperties)
+                {
+                    UObject* NotifyObject = Event.Notify ? static_cast<UObject*>(Event.Notify) : static_cast<UObject*>(Event.NotifyStateClass);
+                    auto Properties = MakeShared<FJsonObject>();
+                    if (NotifyObject)
+                    {
+                        const UObject* Defaults = NotifyObject->GetClass()->GetDefaultObject();
+                        for (TFieldIterator<FProperty> It(NotifyObject->GetClass()); It; ++It)
+                        {
+                            const FProperty* Prop = *It;
+                            if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_Transient))
+                            {
+                                continue;
+                            }
+                            const void* Value = Prop->ContainerPtrToValuePtr<void>(NotifyObject);
+                            if (Defaults && Prop->Identical(Value, Prop->ContainerPtrToValuePtr<void>(Defaults), PPF_None))
+                            {
+                                continue;
+                            }
+                            Properties->SetStringField(Prop->GetName(), UnrealMCPBridge::Reflection::ExportValue(Prop, Value, NotifyObject));
+                        }
+                    }
+                    Entry->SetObjectField(TEXT("properties"), Properties);
+                }
                 Out.Add(MakeShared<FJsonValueObject>(Entry));
             }
 

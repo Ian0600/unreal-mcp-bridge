@@ -325,21 +325,8 @@ namespace MCPLevelData
 
     UWorld* NavWorld(const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError)
     {
-        FString Which;
-        if (Params.IsValid())
-        {
-            Params->TryGetStringField(TEXT("world"), Which);
-        }
-        if (Which.Equals(TEXT("pie"), ESearchCase::IgnoreCase))
-        {
-            UWorld* PlayWorld = GEditor ? GEditor->PlayWorld.Get() : nullptr;
-            if (!PlayWorld)
-            {
-                Fail(OutError, TEXT("world=pie but PIE is not running"));
-            }
-            return PlayWorld;
-        }
-        return GetEditorWorld(OutError);
+        bool bIsPie = false;
+        return UnrealMCPBridge::Scene::ResolveWorld(Params, UnrealMCPBridge::Scene::EDefaultWorld::Editor, bIsPie, OutError);
     }
 
     bool ReadPoint(const TSharedPtr<FJsonValue>& Value, FVector& Out)

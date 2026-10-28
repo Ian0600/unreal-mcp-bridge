@@ -799,6 +799,35 @@ There is no row write: tables are produced by Excel -> DataGen -> JSON, and a ha
 | `pie.exec_console` | `command, world? ("pie" while PIE runs, else "editor"), player? (0)` | `world, command, output, log_lines, log_cursor` | Runs through the PIE player's controller (Exec cheats, cheat manager) or the editor world |
 | `pie.read_log` | `since?, contains?, category?, verbosity?, max? (200)` | `lines: [{seq, category, verbosity, text}], next, dropped` | Read-only. The editor log captured by the bridge since startup (last 20000 lines) |
 | `automation.run_test` | `filter, max_tests? (50), latent_seconds? (5)` | `tests: [{name, ok, errors, warnings, seconds, messages, latent_timeout?}], passed, failed` | Runs tests whose full path starts with `filter`; tests that wait on frames report `latent_timeout` |
+| `pie.status` | `player? (0)` | `running, world, map, begun_play, game_seconds, real_seconds, paused, time_dilation, has_controller, controller_class, pawn, pawn_class, pawn_location, ready` | Read-only. `pie.start` only queues the session; poll this until `ready` (begun play + player pawn). The python `pie_start(wait_ready=True)` does |
+| `pie.log_mark` | `name` | `name, cursor` | Logs `MCP mark: <name>` and remembers its cursor; `pie.read_log since_mark=<name>` reads from there |
+| `pie.read_log` (since_mark) | `since_mark?` | | Start at a `pie.log_mark` instead of a cursor |
+| `debug.line_of_sight` | `from, to, channel? ("Visibility"), world? (pie while running), complex?, ignore? [names], ignore_player? (true in PIE), draw_seconds? (3)` | `world, channel, blocked, hit: {actor, actor_class, actor_path, component, component_class, collision_profile, response, bone, location, distance} or null, touches, length` | First blocking hit and the overlaps before it; draws green to the hit, red past it |
+
+Game events (IFSR): the game writes one JSON line per event to the `LogIFSREvent` category (`ifsr.Debug.Events 1`). The python `events_poll` reads them through `pie.read_log category=LogIFSREvent` and returns them parsed - the bridge needs no game module.
+
+<a name="player"></a>
+### input.*, player.*, view.* (drive the PIE player)
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| `input.inject` | `action (asset name or path), value? (bool / number / [x,y] / [x,y,z]; default pressed), seconds? (0 = one frame, >0 = hold game seconds, <0 = until release), release?, player?` | `action, value_type, mode, seconds?` | Enhanced Input injection; fires only while a mapping context holding the action is active |
+| `player.aim_at` | `target [x,y,z] or actor, deg_per_sec? (360), error_deg? (0), timeout? (5 game s), player?` | `job, target` | Turns the control rotation at a fixed rate, settling `error_deg` off in a random direction picked once |
+| `player.teleport` | `location, yaw?, wait_streaming? (true), timeout? (20), tolerance? (100 cm), settle_seconds? (0.5), player?` | `job` | Holds the pawn (movement off) until WP streaming completes and a ground trace hits, stands it on the ground, measures the real position; puts it back on failure |
+| `player.job_status` | `job` | `job, kind, done, ...` | aim_at: `reached, seconds, error_deg`; teleport: `ok, target, location, distance, streaming_completed, ground_found, seconds, error?, returned?` |
+| `view.is_visible` | `target [x,y,z] or actor, player?` | `on_screen, in_front, inside_viewport, screen, viewport, occluded, occluder, target, distance` | Projection onto the player's viewport plus a camera-to-target visibility trace |
+
+<a name="object-m1"></a>
+### object.* additions, asset.save, animnotify.list, editor.get_status (2026-10-28)
+
+| Method | Params | Result fields | Description |
+|--------|--------|---------------|-------------|
+| property paths | | | `[key]` now also walks maps: `PatternRules[Spore].Cooldown` (key parsed as the key type; enum short or full name). A missing key is an error, never an insert |
+| `object.set_properties` | `object_path, values {path: value}, dry_run?` | `object_path, dry_run, changes: [{path, old_value, new_value, changed}]` | Every value parsed before anything is written |
+| `object.diff_from_defaults` | `object_path, against? ("class" or "native"), edit_only? (true)` | `object_path, against, against_class, differences: [{name, type, value, default}]` | Properties that differ from the class default object |
+| `asset.save` | `object_path? or paths?, deferred? (false)` | `saved, results: [{path, saved, read_only, p4 ("edit" / "add" / ""), file, error?}]` or `{job, queued}` | Read-only files are not attempted. `deferred` saves on the next editor tick; read the outcome with `asset.save_result {job}` (`done` + the same fields) |
+| `animnotify.list` | `include_properties?` | entries gain `label` (always) and `properties` | `name` is the stored NotifyName (a stale copy after edits); `label` is the notify's live GetNotifyName |
+| `editor.get_status` | | adds `command_count, commands` | `is_pie_running` now reads `GEditor->PlayWorld` (it was always false). The python tool replaces `commands` with `server_missing` (commands no tool of that server wraps) to spot an old server |
 
 <a name="sequence"></a>
 ### sequence.*

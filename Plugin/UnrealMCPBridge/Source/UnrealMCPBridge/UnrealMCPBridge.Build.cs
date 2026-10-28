@@ -48,6 +48,8 @@ public class UnrealMCPBridge : ModuleRules
             "GraphEditor",
             "LiveCoding",
             "LevelEditor",
+            // input.inject / player.* drive the PIE player through Enhanced Input
+            "EnhancedInput",
             "PythonScriptPlugin",
             "AnimGraph",
             "AnimGraphRuntime",

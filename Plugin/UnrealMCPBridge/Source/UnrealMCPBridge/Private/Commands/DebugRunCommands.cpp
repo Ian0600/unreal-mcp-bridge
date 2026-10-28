@@ -1,6 +1,15 @@
 #include "Commands/DebugRunCommands.h"
 #include "Commands/CommandJsonHelpers.h"
+#include "Commands/SceneTools.h"
 #include "MCPCommandRegistry.h"
+#include "UnrealMCPBridgeModule.h"
+#include "CollisionQueryParams.h"
+#include "Components/PrimitiveComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/CollisionProfile.h"
+#include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/WorldSettings.h"
 #include "MCPProtocol.h"
 #include "Dom/JsonObject.h"
 
@@ -131,6 +140,92 @@ namespace MCPDebugRun
         }
         return Values;
     }
+
+    /** pie.log_mark name -> the cursor of its mark line. Handlers run on the GameThread only. */
+    TMap<FString, int64>& LogMarks()
+    {
+        static TMap<FString, int64> Marks;
+        return Marks;
+    }
+
+    /** "Visibility" / "ECC_Visibility" / a project trace channel's display name -> channel. */
+    bool ParseTraceChannel(const FString& Name, ECollisionChannel& Out)
+    {
+        if (Name.IsEmpty())
+        {
+            Out = ECC_Visibility;
+            return true;
+        }
+        const UEnum* Enum = StaticEnum<ECollisionChannel>();
+        const int64 ByName = Enum->GetValueByNameString(Name.StartsWith(TEXT("ECC_")) ? Name : TEXT("ECC_") + Name);
+        if (ByName != INDEX_NONE)
+        {
+            Out = static_cast<ECollisionChannel>(ByName);
+            return true;
+        }
+        if (const UCollisionProfile* Profile = UCollisionProfile::Get())
+        {
+            for (int32 Index = 0; Index < ECC_MAX; ++Index)
+            {
+                if (Profile->ReturnChannelNameFromContainerIndex(Index).ToString().Equals(Name, ESearchCase::IgnoreCase))
+                {
+                    Out = static_cast<ECollisionChannel>(Index);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    FString ChannelName(ECollisionChannel Channel)
+    {
+        if (const UCollisionProfile* Profile = UCollisionProfile::Get())
+        {
+            const FName Name = Profile->ReturnChannelNameFromContainerIndex(static_cast<int32>(Channel));
+            if (!Name.IsNone())
+            {
+                return Name.ToString();
+            }
+        }
+        return StaticEnum<ECollisionChannel>()->GetNameStringByValue(Channel);
+    }
+
+    bool ReadPointParam(const TSharedPtr<FJsonObject>& Params, const TCHAR* Field, FVector& Out)
+    {
+        const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+        if (!Params.IsValid() || !Params->TryGetArrayField(Field, Values) || !Values || Values->Num() != 3)
+        {
+            return false;
+        }
+        Out = FVector((*Values)[0]->AsNumber(), (*Values)[1]->AsNumber(), (*Values)[2]->AsNumber());
+        return true;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> VectorJson(const FVector& V)
+    {
+        return { MakeShared<FJsonValueNumber>(V.X), MakeShared<FJsonValueNumber>(V.Y), MakeShared<FJsonValueNumber>(V.Z) };
+    }
+
+    TSharedPtr<FJsonObject> HitJson(const FHitResult& Hit, const FVector& From, ECollisionChannel Channel)
+    {
+        auto Obj = MakeShared<FJsonObject>();
+        const AActor* Actor = Hit.GetActor();
+        const UPrimitiveComponent* Component = Hit.GetComponent();
+        Obj->SetStringField(TEXT("actor"), Actor ? Actor->GetActorNameOrLabel() : FString());
+        Obj->SetStringField(TEXT("actor_class"), Actor ? Actor->GetClass()->GetName() : FString());
+        Obj->SetStringField(TEXT("actor_path"), Actor ? Actor->GetPathName() : FString());
+        Obj->SetStringField(TEXT("component"), Component ? Component->GetName() : FString());
+        Obj->SetStringField(TEXT("component_class"), Component ? Component->GetClass()->GetName() : FString());
+        Obj->SetStringField(TEXT("collision_profile"), Component ? Component->GetCollisionProfileName().ToString() : FString());
+        Obj->SetStringField(TEXT("response"), Component
+            ? StaticEnum<ECollisionResponse>()->GetNameStringByValue(Component->GetCollisionResponseToChannel(Channel))
+            : FString());
+        Obj->SetStringField(TEXT("bone"), Hit.BoneName.ToString());
+        Obj->SetArrayField(TEXT("location"), VectorJson(Hit.ImpactPoint));
+        Obj->SetNumberField(TEXT("distance"), FVector::Dist(From, Hit.ImpactPoint));
+        Obj->SetBoolField(TEXT("blocking"), Hit.bBlockingHit);
+        return Obj;
+    }
 }
 
 FDebugRunCommandHandler::~FDebugRunCommandHandler()
@@ -164,9 +259,8 @@ void FDebugRunCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
     Registry.Register(TEXT("pie.exec_console"),
         [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
-            FString Command, Which;
+            FString Command;
             if (!RequireString(Params, TEXT("command"), Command, OutError)) return nullptr;
-            Params->TryGetStringField(TEXT("world"), Which);
             double PlayerIndex = 0.0;
             Params->TryGetNumberField(TEXT("player"), PlayerIndex);
             if (!GEditor)
@@ -175,11 +269,10 @@ void FDebugRunCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 return nullptr;
             }
 
-            UWorld* PlayWorld = GEditor->PlayWorld.Get();
-            const bool bUsePie = Which.IsEmpty() ? PlayWorld != nullptr : Which.Equals(TEXT("pie"), ESearchCase::IgnoreCase);
-            if (bUsePie && !PlayWorld)
+            bool bUsePie = false;
+            UWorld* PlayWorld = UnrealMCPBridge::Scene::ResolveWorld(Params, UnrealMCPBridge::Scene::EDefaultWorld::PieIfRunning, bUsePie, OutError);
+            if (!PlayWorld)
             {
-                Fail(OutError, TEXT("world=pie but PIE is not running (pie.start first)"));
                 return nullptr;
             }
 
@@ -240,6 +333,17 @@ void FDebugRunCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
                 Params->TryGetStringField(TEXT("verbosity"), Verbosity);
                 Params->TryGetNumberField(TEXT("since"), Since);
                 Params->TryGetNumberField(TEXT("max"), MaxLines);
+                FString SinceMark;
+                if (Params->TryGetStringField(TEXT("since_mark"), SinceMark) && !SinceMark.IsEmpty())
+                {
+                    const int64* MarkSeq = LogMarks().Find(SinceMark);
+                    if (!MarkSeq)
+                    {
+                        Fail(OutError, FString::Printf(TEXT("No log mark named '%s' (pie.log_mark first)"), *SinceMark));
+                        return nullptr;
+                    }
+                    Since = static_cast<double>(*MarkSeq);
+                }
             }
             const int32 Max = FMath::Clamp(static_cast<int32>(MaxLines), 1, 5000);
 
@@ -265,6 +369,171 @@ void FDebugRunCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             Result->SetArrayField(TEXT("lines"), LinesToJson(Lines));
             Result->SetNumberField(TEXT("next"), static_cast<double>(Next));
             Result->SetNumberField(TEXT("dropped"), static_cast<double>(bTail ? 0 : FMath::Max<int64>(0, Oldest - From)));
+            return Result;
+        });
+
+    // pie.log_mark — writes "MCP mark: <name>" to the log and remembers its cursor, so a test can
+    // later read "everything since round 3 started" with pie.read_log since_mark=<name> instead of
+    // keeping cursors itself. Marks live until the editor closes; reusing a name moves it.
+    // Params: name (required). Returns { name, cursor }.
+    Registry.Register(TEXT("pie.log_mark"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FString Name;
+            if (!RequireString(Params, TEXT("name"), Name, OutError)) return nullptr;
+            const int64 Cursor = LogCapture().IsValid() ? LogCapture()->GetNextSeq() : 0;
+            UE_LOG(LogMCPBridge, Display, TEXT("MCP mark: %s"), *Name);
+            LogMarks().Add(Name, Cursor);
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetStringField(TEXT("name"), Name);
+            Result->SetNumberField(TEXT("cursor"), static_cast<double>(Cursor));
+            return Result;
+        });
+
+    // pie.status — read-only. Whether PIE runs and whether it is ready to drive: the world has
+    // begun play and player 0 possesses a pawn. pie.start only queues the session, so a caller
+    // polls this (the python pie_start(wait_ready=True) does). Params: player (default 0).
+    // Returns { running, world, map, begun_play, game_seconds, real_seconds, paused, time_dilation,
+    // has_controller, pawn, pawn_class, pawn_location, ready }.
+    Registry.Register(TEXT("pie.status"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& /*OutError*/) -> TSharedPtr<FJsonObject>
+        {
+            double PlayerIndex = 0.0;
+            if (Params.IsValid())
+            {
+                Params->TryGetNumberField(TEXT("player"), PlayerIndex);
+            }
+            UWorld* PlayWorld = GEditor ? GEditor->PlayWorld.Get() : nullptr;
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetBoolField(TEXT("running"), PlayWorld != nullptr);
+            if (!PlayWorld)
+            {
+                Result->SetBoolField(TEXT("ready"), false);
+                return Result;
+            }
+            Result->SetStringField(TEXT("world"), PlayWorld->GetName());
+            Result->SetStringField(TEXT("map"), PlayWorld->GetMapName());
+            Result->SetBoolField(TEXT("begun_play"), PlayWorld->HasBegunPlay());
+            Result->SetNumberField(TEXT("game_seconds"), PlayWorld->GetTimeSeconds());
+            Result->SetNumberField(TEXT("real_seconds"), PlayWorld->GetRealTimeSeconds());
+            Result->SetBoolField(TEXT("paused"), PlayWorld->IsPaused());
+            Result->SetNumberField(TEXT("time_dilation"), PlayWorld->GetWorldSettings() ? PlayWorld->GetWorldSettings()->GetEffectiveTimeDilation() : 1.0);
+
+            APlayerController* Controller = UGameplayStatics::GetPlayerController(PlayWorld, static_cast<int32>(PlayerIndex));
+            const APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+            Result->SetBoolField(TEXT("has_controller"), Controller != nullptr);
+            Result->SetStringField(TEXT("controller_class"), Controller ? Controller->GetClass()->GetName() : FString());
+            Result->SetStringField(TEXT("pawn"), Pawn ? Pawn->GetActorNameOrLabel() : FString());
+            Result->SetStringField(TEXT("pawn_class"), Pawn ? Pawn->GetClass()->GetName() : FString());
+            if (Pawn)
+            {
+                Result->SetArrayField(TEXT("pawn_location"), VectorJson(Pawn->GetActorLocation()));
+            }
+            Result->SetBoolField(TEXT("ready"), PlayWorld->HasBegunPlay() && Pawn != nullptr);
+            return Result;
+        });
+
+    // debug.line_of_sight — read-only (draws a debug line). Traces from -> to and reports what
+    // blocks it first, and what it touched on the way. Params: from, to ([x,y,z], required),
+    // channel ("Visibility" default, "Camera", "ECC_*" or a project trace channel name),
+    // world ("pie" default when PIE runs, else "editor"), complex (bool, default false),
+    // ignore (array of actor names/labels to skip), ignore_player (bool, default true in PIE:
+    // skip player 0's pawn — a trace from its eyes otherwise starts inside its own capsule),
+    // draw_seconds (default 3, 0 = no drawing).
+    // Returns { world, channel, blocked, hit (first blocking hit or null), touches: [...] }.
+    Registry.Register(TEXT("debug.line_of_sight"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            FVector From, To;
+            if (!ReadPointParam(Params, TEXT("from"), From) || !ReadPointParam(Params, TEXT("to"), To))
+            {
+                Fail(OutError, TEXT("from and to ([x, y, z]) are required"));
+                return nullptr;
+            }
+            FString ChannelText;
+            Params->TryGetStringField(TEXT("channel"), ChannelText);
+            ECollisionChannel Channel = ECC_Visibility;
+            if (!ParseTraceChannel(ChannelText, Channel))
+            {
+                Fail(OutError, FString::Printf(TEXT("Unknown channel '%s'"), *ChannelText));
+                return nullptr;
+            }
+            bool bIsPie = false;
+            UWorld* World = UnrealMCPBridge::Scene::ResolveWorld(Params, UnrealMCPBridge::Scene::EDefaultWorld::PieIfRunning, bIsPie, OutError);
+            if (!World) return nullptr;
+
+            bool bComplex = false;
+            Params->TryGetBoolField(TEXT("complex"), bComplex);
+            double DrawSeconds = 3.0;
+            Params->TryGetNumberField(TEXT("draw_seconds"), DrawSeconds);
+
+            FCollisionQueryParams Query(SCENE_QUERY_STAT(MCPLineOfSight), bComplex);
+            bool bIgnorePlayer = bIsPie;
+            Params->TryGetBoolField(TEXT("ignore_player"), bIgnorePlayer);
+            if (bIgnorePlayer)
+            {
+                if (APawn* PlayerPawn = UGameplayStatics::GetPlayerPawn(World, 0))
+                {
+                    Query.AddIgnoredActor(PlayerPawn);
+                }
+            }
+            const TArray<TSharedPtr<FJsonValue>>* IgnoreValues = nullptr;
+            if (Params->TryGetArrayField(TEXT("ignore"), IgnoreValues) && IgnoreValues)
+            {
+                TSet<FString> IgnoreNames;
+                for (const TSharedPtr<FJsonValue>& Value : *IgnoreValues)
+                {
+                    IgnoreNames.Add(Value->AsString());
+                }
+                for (TActorIterator<AActor> It(World); It; ++It)
+                {
+                    if (IgnoreNames.Contains(It->GetName()) || IgnoreNames.Contains(It->GetActorNameOrLabel()))
+                    {
+                        Query.AddIgnoredActor(*It);
+                    }
+                }
+            }
+
+            TArray<FHitResult> Hits;
+            World->LineTraceMultiByChannel(Hits, From, To, Channel, Query);
+            const FHitResult* Block = Hits.FindByPredicate([](const FHitResult& Hit) { return Hit.bBlockingHit; });
+
+            TArray<TSharedPtr<FJsonValue>> Touches;
+            for (const FHitResult& Hit : Hits)
+            {
+                if (!Hit.bBlockingHit)
+                {
+                    Touches.Add(MakeShared<FJsonValueObject>(HitJson(Hit, From, Channel)));
+                }
+            }
+
+            if (DrawSeconds > 0.0)
+            {
+                const FVector End = Block ? FVector(Block->ImpactPoint) : To;
+                DrawDebugLine(World, From, End, FColor::Green, false, DrawSeconds, 0, 2.f);
+                if (Block)
+                {
+                    DrawDebugLine(World, End, To, FColor::Red, false, DrawSeconds, 0, 1.f);
+                    DrawDebugPoint(World, End, 14.f, FColor::Red, false, DrawSeconds);
+                }
+            }
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetStringField(TEXT("world"), bIsPie ? TEXT("pie") : TEXT("editor"));
+            Result->SetStringField(TEXT("channel"), ChannelName(Channel));
+            Result->SetBoolField(TEXT("blocked"), Block != nullptr);
+            if (Block)
+            {
+                Result->SetObjectField(TEXT("hit"), HitJson(*Block, From, Channel));
+            }
+            else
+            {
+                Result->SetField(TEXT("hit"), MakeShared<FJsonValueNull>());
+            }
+            Result->SetArrayField(TEXT("touches"), Touches);
+            Result->SetNumberField(TEXT("length"), FVector::Dist(From, To));
             return Result;
         });
 

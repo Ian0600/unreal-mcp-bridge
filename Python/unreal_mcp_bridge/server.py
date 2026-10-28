@@ -26,6 +26,8 @@ from .tools import (
     register_level_data_tools,
     register_datatable_tools,
     register_sequence_tools,
+    register_object_tools,
+    register_player_tools,
     register_call_tools,
 )
 
@@ -57,6 +59,8 @@ def main() -> None:
     register_level_data_tools(mcp, conn)
     register_datatable_tools(mcp, conn)
     register_sequence_tools(mcp, conn)
+    register_object_tools(mcp, conn)
+    register_player_tools(mcp, conn)
     register_call_tools(mcp, conn)
 
     try:

@@ -25,6 +25,10 @@ public:
         TSharedPtr<FJsonObject>& OutResult,
         MCPProtocol::FMCPError& OutError) const;
 
+    // Every registered method name, sorted. editor.get_status returns it so a client can tell
+    // which commands its own (possibly older) server does not wrap yet.
+    TArray<FString> GetMethods() const;
+
 private:
     TMap<FString, FMCPCommandFunction> Handlers;
 };

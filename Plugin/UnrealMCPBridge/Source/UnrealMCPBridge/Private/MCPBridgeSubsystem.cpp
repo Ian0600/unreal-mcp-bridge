@@ -28,6 +28,7 @@
 #include "Commands/LevelDataCommands.h"
 #include "Commands/DataTableCommands.h"
 #include "Commands/DebugRunCommands.h"
+#include "Commands/PlayerCommands.h"
 #include "Commands/SequenceAuthoringCommands.h"
 
 void UMCPBridgeSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -84,6 +85,7 @@ void UMCPBridgeSubsystem::StartListener()
         Handlers.Add(MakeShared<FLevelDataCommandHandler>());
         Handlers.Add(MakeShared<FDataTableCommandHandler>());
         Handlers.Add(MakeShared<FDebugRunCommandHandler>());
+        Handlers.Add(MakeShared<FPlayerCommandHandler>());
         Handlers.Add(MakeShared<FSequenceAuthoringCommandHandler>());
 
         for (const TSharedPtr<IMCPCommandHandler>& Handler : Handlers)

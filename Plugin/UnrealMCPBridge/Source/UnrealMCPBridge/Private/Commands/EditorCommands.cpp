@@ -19,9 +19,11 @@ namespace
 
 void FEditorCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
 {
-    // editor.get_status — returns current level name, selection counts, PIE state
+    // editor.get_status — returns current level name, selection counts, PIE state, and every
+    // registered command name (commands) so a client can see what its server does not wrap yet.
+    // The registry outlives every handler it stores, so capturing it by reference is safe.
     Registry.Register(TEXT("editor.get_status"),
-        [](const TSharedPtr<FJsonObject>& /*Params*/, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        [&Registry](const TSharedPtr<FJsonObject>& /*Params*/, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
             if (!GEditor)
             {
@@ -45,13 +47,23 @@ void FEditorCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             }
 
             const int32 SelectedActorCount = GEditor->GetSelectedActorCount();
-            const bool bIsPIERunning = World->IsPlayInEditor();
+            // The editor world is never the play world, so World->IsPlayInEditor() was always false.
+            // PlayWorld is set while PIE (or SIE) runs.
+            const bool bIsPIERunning = GEditor->PlayWorld != nullptr;
+
+            TArray<TSharedPtr<FJsonValue>> Commands;
+            for (const FString& Method : Registry.GetMethods())
+            {
+                Commands.Add(MakeShared<FJsonValueString>(Method));
+            }
 
             auto Result = MakeShared<FJsonObject>();
             Result->SetStringField(TEXT("current_level"), World->GetMapName());
             Result->SetNumberField(TEXT("selected_actor_count"), static_cast<double>(SelectedActorCount));
             Result->SetNumberField(TEXT("total_actor_count"), static_cast<double>(TotalActorCount));
             Result->SetBoolField(TEXT("is_pie_running"), bIsPIERunning);
+            Result->SetNumberField(TEXT("command_count"), static_cast<double>(Commands.Num()));
+            Result->SetArrayField(TEXT("commands"), Commands);
             return Result;
         });
 

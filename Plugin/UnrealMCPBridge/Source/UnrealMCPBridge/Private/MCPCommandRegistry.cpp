@@ -38,3 +38,11 @@ bool FMCPCommandRegistry::Dispatch(
     }
     return true;
 }
+
+TArray<FString> FMCPCommandRegistry::GetMethods() const
+{
+    TArray<FString> Methods;
+    Handlers.GetKeys(Methods);
+    Methods.Sort();
+    return Methods;
+}

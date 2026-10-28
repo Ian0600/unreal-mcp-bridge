@@ -77,6 +77,62 @@ namespace UnrealMCPBridge::Reflection
         return Current;
     }
 
+    /** Non-negative whole number — what an array index in a path must be. */
+    inline bool IsIndexText(const FString& Text)
+    {
+        if (Text.IsEmpty())
+        {
+            return false;
+        }
+        for (const TCHAR Ch : Text)
+        {
+            if (!FChar::IsDigit(Ch))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Finds the pair whose key equals KeyText, parsed as the map's key type. Enum keys take the
+     * short name ("Spore") or the full one ("EIFSRMotherlordPattern::Spore"); ImportText accepts
+     * both. Returns the pair index for FScriptMapHelper, or INDEX_NONE with the keys that exist.
+     */
+    inline int32 FindMapPair(FMapProperty* MapProp, void* MapAddr, const FString& KeyText, UObject* Owner, FString& OutError)
+    {
+        FProperty* KeyProp = MapProp->KeyProp;
+        void* Scratch = FMemory::Malloc(KeyProp->GetSize(), KeyProp->GetMinAlignment());
+        KeyProp->InitializeValue(Scratch);
+        const bool bParsed = KeyProp->ImportText_Direct(*KeyText, Scratch, Owner, PPF_None) != nullptr;
+
+        int32 Found = INDEX_NONE;
+        FScriptMapHelper Helper(MapProp, MapAddr);
+        TArray<FString> Keys;
+        for (FScriptMapHelper::FIterator It(Helper); It; ++It)
+        {
+            const void* PairKey = Helper.GetKeyPtr(It.GetInternalIndex());
+            if (bParsed && KeyProp->Identical(PairKey, Scratch, PPF_None))
+            {
+                Found = It.GetInternalIndex();
+                break;
+            }
+            FString Exported;
+            KeyProp->ExportText_Direct(Exported, PairKey, PairKey, Owner, PPF_None);
+            Keys.Add(Exported);
+        }
+        KeyProp->DestroyValue(Scratch);
+        FMemory::Free(Scratch);
+
+        if (Found == INDEX_NONE)
+        {
+            OutError = bParsed
+                ? FString::Printf(TEXT("key [%s] is not in the map (keys: %s)"), *KeyText, *FString::Join(Keys, TEXT(", ")))
+                : FString::Printf(TEXT("[%s] is not a valid %s key"), *KeyText, *KeyProp->GetCPPType());
+        }
+        return Found;
+    }
+
     /**
      * A property plus the address of the specific value it names — the result of walking a path.
      * Owner is the innermost object that holds the value: the root for "Count", the component
@@ -93,11 +149,15 @@ namespace UnrealMCPBridge::Reflection
     /**
      * Walks a dotted property path from a root object down to one value.
      *
-     * Supports struct members, object hops, and array indexing, so all of these work:
+     * Supports struct members, object hops, array indexing and map keys, so all of these work:
      *   "BoomOffset"                  a plain property
      *   "RelativeLocation.X"          a struct member
      *   "Children[2]"                 one array element
      *   "Children[2].bIsEnabled"      a member of the object an array element points at
+     *   "PatternRules[Spore].Cooldown" the value under one map key (enum short or full name,
+     *                                 FName, string or number — parsed as the key type)
+     *
+     * A missing map key is an error, never an insert: a typo must not grow the map.
      *
      * The address returned is the value's own address, which is what ImportText_Direct and
      * ExportText_Direct both want — not the container's.
@@ -121,18 +181,20 @@ namespace UnrealMCPBridge::Reflection
         {
             FString Token = Tokens[TokenIndex];
 
-            // Peel a trailing [n] off the token, if present.
-            int32 ArrayIndex = INDEX_NONE;
+            // Peel a trailing [index or key] off the token, if present.
+            bool bHasBracket = false;
+            FString BracketText;
             int32 OpenBracket = INDEX_NONE;
             if (Token.FindChar(TEXT('['), OpenBracket))
             {
                 const int32 CloseBracket = Token.Find(TEXT("]"), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
                 if (CloseBracket == INDEX_NONE || CloseBracket <= OpenBracket)
                 {
-                    OutError = FString::Printf(TEXT("Malformed array index in '%s'"), *Token);
+                    OutError = FString::Printf(TEXT("Malformed [index] or [key] in '%s'"), *Token);
                     return false;
                 }
-                ArrayIndex = FCString::Atoi(*Token.Mid(OpenBracket + 1, CloseBracket - OpenBracket - 1));
+                bHasBracket = true;
+                BracketText = Token.Mid(OpenBracket + 1, CloseBracket - OpenBracket - 1).TrimStartAndEnd();
                 Token = Token.Left(OpenBracket);
             }
 
@@ -151,23 +213,43 @@ namespace UnrealMCPBridge::Reflection
 
             void* Addr = Prop->ContainerPtrToValuePtr<void>(CurrentAddr);
 
-            if (ArrayIndex != INDEX_NONE)
+            if (bHasBracket)
             {
-                FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop);
-                if (!ArrayProp)
+                if (FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop))
                 {
-                    OutError = FString::Printf(TEXT("Property '%s' is not an array, so [%d] is invalid"), *Token, ArrayIndex);
+                    if (!IsIndexText(BracketText))
+                    {
+                        OutError = FString::Printf(TEXT("'%s' is an array — [%s] must be a number"), *Token, *BracketText);
+                        return false;
+                    }
+                    const int32 ArrayIndex = FCString::Atoi(*BracketText);
+                    FScriptArrayHelper Helper(ArrayProp, Addr);
+                    if (!Helper.IsValidIndex(ArrayIndex))
+                    {
+                        OutError = FString::Printf(TEXT("Index %d is out of range for '%s' (%d elements)"),
+                            ArrayIndex, *Token, Helper.Num());
+                        return false;
+                    }
+                    Addr = Helper.GetRawPtr(ArrayIndex);
+                    Prop = ArrayProp->Inner;
+                }
+                else if (FMapProperty* MapProp = CastField<FMapProperty>(Prop))
+                {
+                    const int32 PairIndex = FindMapPair(MapProp, Addr, BracketText, CurrentOwner, OutError);
+                    if (PairIndex == INDEX_NONE)
+                    {
+                        OutError = FString::Printf(TEXT("'%s': %s"), *Token, *OutError);
+                        return false;
+                    }
+                    FScriptMapHelper Helper(MapProp, Addr);
+                    Addr = Helper.GetValuePtr(PairIndex);
+                    Prop = MapProp->ValueProp;
+                }
+                else
+                {
+                    OutError = FString::Printf(TEXT("Property '%s' is neither an array nor a map, so [%s] is invalid"), *Token, *BracketText);
                     return false;
                 }
-                FScriptArrayHelper Helper(ArrayProp, Addr);
-                if (!Helper.IsValidIndex(ArrayIndex))
-                {
-                    OutError = FString::Printf(TEXT("Index %d is out of range for '%s' (%d elements)"),
-                        ArrayIndex, *Token, Helper.Num());
-                    return false;
-                }
-                Addr = Helper.GetRawPtr(ArrayIndex);
-                Prop = ArrayProp->Inner;
             }
 
             CurrentProp = Prop;

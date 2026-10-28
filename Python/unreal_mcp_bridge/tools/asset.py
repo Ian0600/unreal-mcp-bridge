@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from fastmcp import FastMCP
 
 from ..connection import UnrealConnection
@@ -22,10 +24,32 @@ def register_asset_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         return conn.call("asset.get_metadata", {"object_path": object_path})
 
     @mcp.tool()
-    def asset_save(object_path: str) -> dict:
-        if not object_path:
-            raise ValueError("object_path is required")
-        return conn.call("asset.save", {"object_path": object_path})
+    def asset_save(
+        object_path: str = "",
+        paths: list[str] | None = None,
+        deferred: bool = True,
+        timeout: float = 60.0,
+    ) -> dict:
+        """Saves one or more asset packages and reports each file's state.
+
+        deferred (default True): the save runs on the next editor tick, outside this request, and this
+        tool waits for it (up to timeout seconds) - the safe way after editing or compiling the asset.
+        Read-only files are not attempted: their p4 field says "edit" (check out first); "add" = new file.
+
+        Returns {saved (all ok), results: [{path, saved, read_only, p4, file, error}]}."""
+        all_paths = ([object_path] if object_path else []) + list(paths or [])
+        if not all_paths:
+            raise ValueError("object_path or paths is required")
+        queued = conn.call("asset.save", {"paths": all_paths, "deferred": deferred})
+        if not deferred:
+            return queued
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            result = conn.call("asset.save_result", {"job": queued["job"]})
+            if result.get("done"):
+                return result
+            time.sleep(0.2)
+        raise TimeoutError(f"save job {queued['job']} did not finish in {timeout}s (asset.save_result to check later)")
 
     @mcp.tool()
     def asset_fixup_redirectors(
