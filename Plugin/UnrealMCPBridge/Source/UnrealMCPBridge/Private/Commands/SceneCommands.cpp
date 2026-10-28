@@ -2344,3 +2344,11 @@ void FSceneCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             return MakeJobStatus(**Job);
         });
 }
+
+namespace UnrealMCPBridge::Scene
+{
+    bool ResolveImageOutputPath(const FString& InPath, FString& OutPath, FString& OutError)
+    {
+        return MCPScene::ResolveCapturePath(InPath, OutPath, OutError);
+    }
+}

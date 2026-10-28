@@ -816,6 +816,9 @@ Game events (IFSR): the game writes one JSON line per event to the `LogIFSREvent
 | `player.teleport` | `location, yaw?, wait_streaming? (true), timeout? (20), tolerance? (100 cm), settle_seconds? (0.5), player?` | `job` | Holds the pawn (movement off) until WP streaming completes and a ground trace hits, stands it on the ground, measures the real position; puts it back on failure |
 | `player.job_status` | `job` | `job, kind, done, ...` | aim_at: `reached, seconds, error_deg`; teleport: `ok, target, location, distance, streaming_completed, ground_found, seconds, error?, returned?` |
 | `view.is_visible` | `target [x,y,z] or actor, player?` | `on_screen, in_front, inside_viewport, screen, viewport, occluded, occluder, target, distance` | Projection onto the player's viewport plus a camera-to-target visibility trace |
+| `view.capture` | `path?, frames? (1, max 300), every? (1), player?` | `job`; job: `files, width, height, frames, error?` | Reads the PIE viewport (debug lines included; scene.capture_view renders the editor world). frames > 1 writes `<path>_0001.png` ...; the editor window must not be minimized |
+| `anim.record` | `actor, seconds? (5), interval? (0.1), mesh?, changes_only? (true)` | `job`; job: `actor, samples: [{t, mesh, montages: [{montage, anim, slot, section, position, weight, playing}]}]` | Montage instances per skeletal mesh over game time; `anim` = the sequence inside a dynamic montage. The first sample of each mesh is always kept |
+| `player.move_to` | `location, sprint?, move_action? ("IA_Move", x = right, y = forward), sprint_action? ("IA_Sprint"), acceptance? (100), timeout? (30), player?` | `job, path_points`; job: `result (arrived / blocked / timeout / no_path), location, distance, seconds` | Navmesh path walked with continuous move input; blocked = no progress for 2 s |
 
 <a name="object-m1"></a>
 ### object.* additions, asset.save, animnotify.list, editor.get_status (2026-10-28)

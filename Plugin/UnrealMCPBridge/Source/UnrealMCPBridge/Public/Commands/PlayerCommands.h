@@ -8,7 +8,10 @@
 //   player.aim_at      turn the camera toward a point at a set speed, with an aim error
 //   player.teleport    move the player, wait for World Partition cells and the ground, verify the result
 //   view.is_visible    is a point / actor on the player's screen and not hidden behind something
-//   player.job_status  result of an aim_at / teleport job (they take several frames)
+//   player.move_to     walk to a point along the navmesh with move input
+//   view.capture       save what the PIE player sees (debug lines included), one frame or a run
+//   anim.record        what an actor's meshes play over time (montages, slot sequences, sections)
+//   player.job_status  result of the jobs above (they take several frames)
 class FPlayerCommandHandler : public IMCPCommandHandler
 {
 public:

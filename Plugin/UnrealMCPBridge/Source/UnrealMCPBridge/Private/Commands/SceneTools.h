@@ -37,6 +37,10 @@ namespace UnrealMCPBridge::Scene
      */
     UWorld* ResolveWorld(const TSharedPtr<FJsonObject>& Params, EDefaultWorld Default, bool& bOutIsPie, MCPProtocol::FMCPError& OutError);
 
+    /** An image output path under <Project>/Saved or a CaptureOutputRoots folder (relative = under Saved, .png added when
+     *  no extension). The rule scene.capture_view uses - view.capture writes PIE frames by the same rule. */
+    bool ResolveImageOutputPath(const FString& InPath, FString& OutPath, FString& OutError);
+
     /** Names of the packages that were dirty when the snapshot was taken. */
     struct FDirtySnapshot
     {

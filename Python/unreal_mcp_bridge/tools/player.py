@@ -108,6 +108,54 @@ def register_player_tools(mcp: FastMCP, conn: UnrealConnection) -> None:
         return conn.call("view.is_visible", params)
 
     @mcp.tool()
+    def player_move_to(
+        location: list[float],
+        sprint: bool = False,
+        acceptance: float = 100.0,
+        timeout: float = 30.0,
+        move_action: str = "IA_Move",
+        sprint_action: str = "IA_Sprint",
+        wait: bool = True,
+        player: int = 0,
+    ) -> dict:
+        """Walks the PIE player to a point along the navmesh with move input (like a person: it takes time
+        and the player cannot do other things the game blocks while moving).
+
+        Returns {job, done, result ("arrived" / "blocked" = no progress for 2 s / "timeout" / "no_path"),
+        location, distance, seconds, path_points}."""
+        started = conn.call("player.move_to", {
+            "location": location, "sprint": sprint, "acceptance": acceptance, "timeout": timeout,
+            "move_action": move_action, "sprint_action": sprint_action, "player": player,
+        })
+        return _wait_job(conn, started["job"], timeout * 4 + 10) if wait else started
+
+    @mcp.tool()
+    def view_capture(path: str = "", frames: int = 1, every: int = 1, wait: bool = True, player: int = 0) -> dict:
+        """Saves what the PIE player sees - debug lines included (it reads the PIE viewport; capture_view renders
+        the editor world instead). frames > 1 writes <path>_0001.png ... one every `every` rendered frames
+        (max 300). path: png/jpg under <Project>/Saved (relative = under Saved) or a CaptureOutputRoots folder.
+        Pair with pie_exec_console("ifsr.Motherlord.View side|top") for fixed angles.
+        The editor window must not be minimized.
+
+        Returns {job, done, files, width, height, frames, error?}."""
+        started = conn.call("view.capture", {"path": path, "frames": frames, "every": every, "player": player})
+        return _wait_job(conn, started["job"], frames * every * 0.5 + 30) if wait else started
+
+    @mcp.tool()
+    def anim_record(actor: str, seconds: float = 5.0, interval: float = 0.1, mesh: str = "",
+                    changes_only: bool = True, wait: bool = True, player: int = 0) -> dict:
+        """Records what an actor's skeletal meshes play over game time: montage, the sequence inside dynamic
+        montages (PlaySlotAnimationAsDynamicMontage), slot, section, position, weight. mesh filters components
+        by name. changes_only keeps a sample only when something other than position changed.
+
+        Returns {job, done, actor, samples: [{t, mesh, montages: [{montage, anim, slot, section, position, weight, playing}]}]}."""
+        params: dict = {"actor": actor, "seconds": seconds, "interval": interval, "changes_only": changes_only, "player": player}
+        if mesh:
+            params["mesh"] = mesh
+        started = conn.call("anim.record", params)
+        return _wait_job(conn, started["job"], seconds * 4 + 10) if wait else started
+
+    @mcp.tool()
     def player_job_status(job: int) -> dict:
-        """Read-only. State of a player_aim_at / player_teleport job started with wait=False."""
+        """Read-only. State of a job (aim_at / teleport / move_to / view_capture / anim_record) started with wait=False."""
         return conn.call("player.job_status", {"job": job})

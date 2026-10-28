@@ -22,6 +22,16 @@
 #include "InputActionValue.h"
 #include "Kismet/GameplayStatics.h"
 #include "WorldPartition/WorldPartitionSubsystem.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/GameViewportClient.h"
+#include "HAL/FileManager.h"
+#include "ImageUtils.h"
+#include "Misc/Paths.h"
+#include "NavigationPath.h"
+#include "NavigationSystem.h"
+#include "UnrealClient.h"
 
 namespace MCPPlayer
 {
@@ -573,7 +583,350 @@ void FPlayerCommandHandler::RegisterCommands(FMCPCommandRegistry& Registry)
             return Result;
         });
 
-    // player.job_status — the state of an aim_at / teleport job. Params: job (required).
+    // view.capture — saves what the PIE player sees, debug lines included (it reads the game
+    // viewport, unlike scene.capture_view which renders the editor world through a scene capture).
+    // Params: path (png/jpg under <Project>/Saved or CaptureOutputRoots; frames > 1 append _0001 ...),
+    // frames (default 1, max 300), every (frames between shots, default 1), player.
+    // Returns { job }; player.job_status gives { done, files, width, height, frames, error }.
+    // The editor window must be visible — a background PIE viewport does not render new frames.
+    Registry.Register(TEXT("view.capture"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            APlayerController* Controller = PiePlayer(Params, OutError);
+            if (!Controller) return nullptr;
+            FString RequestedPath;
+            Params->TryGetStringField(TEXT("path"), RequestedPath);
+            FString BasePath, PathError;
+            if (!UnrealMCPBridge::Scene::ResolveImageOutputPath(RequestedPath, BasePath, PathError))
+            {
+                PlayerFail(OutError, PathError);
+                return nullptr;
+            }
+            double FramesValue = 1.0, EveryValue = 1.0;
+            Params->TryGetNumberField(TEXT("frames"), FramesValue);
+            Params->TryGetNumberField(TEXT("every"), EveryValue);
+            const int32 Frames = FMath::Clamp(static_cast<int32>(FramesValue), 1, 300);
+            const int32 Every = FMath::Max(1, static_cast<int32>(EveryValue));
+
+            const int32 Job = NewJob(TEXT("view_capture"));
+            TWeakObjectPtr<UWorld> WeakWorld = Controller->GetWorld();
+            TSharedRef<int32> Tick = MakeShared<int32>(0);
+            TSharedRef<TArray<TSharedPtr<FJsonValue>>> Files = MakeShared<TArray<TSharedPtr<FJsonValue>>>();
+            FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+                [Job, WeakWorld, BasePath, Frames, Every, Tick, Files](float)
+                {
+                    TSharedPtr<FJsonObject> State = JobState(Job);
+                    if (!State.IsValid()) return false;
+                    UGameViewportClient* ViewportClient = WeakWorld.IsValid() ? WeakWorld->GetGameViewport() : nullptr;
+                    FViewport* Viewport = ViewportClient ? ViewportClient->Viewport : nullptr;
+                    if (!Viewport)
+                    {
+                        State->SetBoolField(TEXT("done"), true);
+                        State->SetStringField(TEXT("error"), TEXT("PIE ended or has no viewport"));
+                        return false;
+                    }
+                    if ((*Tick)++ % Every != 0)
+                    {
+                        return true;
+                    }
+                    TArray<FColor> Pixels;
+                    const FIntPoint Size = Viewport->GetSizeXY();
+                    if (Size.X <= 0 || !Viewport->ReadPixels(Pixels) || Pixels.Num() != Size.X * Size.Y)
+                    {
+                        State->SetBoolField(TEXT("done"), true);
+                        State->SetStringField(TEXT("error"), TEXT("Reading the PIE viewport failed (is the editor window minimized?)"));
+                        return false;
+                    }
+                    for (FColor& Pixel : Pixels)
+                    {
+                        Pixel.A = 255;
+                    }
+                    const FString File = Frames == 1 ? BasePath
+                        : FPaths::GetPath(BasePath) / FString::Printf(TEXT("%s_%04d.%s"), *FPaths::GetBaseFilename(BasePath), Files->Num() + 1, *FPaths::GetExtension(BasePath));
+                    IFileManager::Get().MakeDirectory(*FPaths::GetPath(File), /*Tree=*/true);
+                    if (!FImageUtils::SaveImageByExtension(*File, FImageView(Pixels.GetData(), Size.X, Size.Y)))
+                    {
+                        State->SetBoolField(TEXT("done"), true);
+                        State->SetStringField(TEXT("error"), FString::Printf(TEXT("Writing %s failed"), *File));
+                        return false;
+                    }
+                    Files->Add(MakeShared<FJsonValueString>(File));
+                    State->SetNumberField(TEXT("width"), Size.X);
+                    State->SetNumberField(TEXT("height"), Size.Y);
+                    State->SetArrayField(TEXT("files"), *Files);
+                    State->SetNumberField(TEXT("frames"), Files->Num());
+                    if (Files->Num() >= Frames)
+                    {
+                        State->SetBoolField(TEXT("done"), true);
+                        return false;
+                    }
+                    return true;
+                }));
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("job"), Job);
+            return Result;
+        });
+
+    // anim.record — what an actor's skeletal meshes play, sampled over time (montages, the sequences
+    // inside dynamic montages from PlaySlotAnimationAsDynamicMontage, slot, section, position, weight).
+    // Params: actor (name / label in the PIE world, required), seconds (game seconds, default 5),
+    // interval (game seconds between samples, default 0.1), mesh (component name filter, optional),
+    // changes_only (default true: a sample is kept only when something but position moved).
+    // Returns { job }; player.job_status gives { done, actor, samples: [{t, mesh, montages: [{montage,
+    // anim, slot, section, position, weight, playing}]}] }.
+    Registry.Register(TEXT("anim.record"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            APlayerController* Controller = PiePlayer(Params, OutError);
+            if (!Controller) return nullptr;
+            FVector Ignored;
+            AActor* Actor = nullptr;
+            FString TargetError;
+            if (!Params->HasField(TEXT("actor")) || !ReadTarget(Params, Controller->GetWorld(), Ignored, Actor, TargetError) || !Actor)
+            {
+                PlayerFail(OutError, TargetError.IsEmpty() ? TEXT("actor (name / label) is required") : TargetError);
+                return nullptr;
+            }
+            double Seconds = 5.0, Interval = 0.1;
+            Params->TryGetNumberField(TEXT("seconds"), Seconds);
+            Params->TryGetNumberField(TEXT("interval"), Interval);
+            FString MeshFilter;
+            Params->TryGetStringField(TEXT("mesh"), MeshFilter);
+            bool bChangesOnly = true;
+            Params->TryGetBoolField(TEXT("changes_only"), bChangesOnly);
+
+            const int32 Job = NewJob(TEXT("anim_record"));
+            TSharedPtr<FJsonObject> Start = JobState(Job);
+            Start->SetStringField(TEXT("actor"), Actor->GetActorNameOrLabel());
+            TWeakObjectPtr<AActor> WeakActor = Actor;
+            const double StartTime = Actor->GetWorld()->GetTimeSeconds();
+            TSharedRef<double> NextSample = MakeShared<double>(StartTime);
+            TSharedRef<TArray<TSharedPtr<FJsonValue>>> Samples = MakeShared<TArray<TSharedPtr<FJsonValue>>>();
+            TSharedRef<TMap<FString, FString>> LastKey = MakeShared<TMap<FString, FString>>();
+            FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+                [Job, WeakActor, StartTime, Seconds, Interval, MeshFilter, bChangesOnly, NextSample, Samples, LastKey](float)
+                {
+                    TSharedPtr<FJsonObject> State = JobState(Job);
+                    AActor* A = WeakActor.Get();
+                    if (!State.IsValid()) return false;
+                    if (!A || !A->GetWorld())
+                    {
+                        State->SetBoolField(TEXT("done"), true);
+                        State->SetStringField(TEXT("error"), TEXT("PIE ended or the actor is gone"));
+                        return false;
+                    }
+                    const double Now = A->GetWorld()->GetTimeSeconds();
+                    if (Now < *NextSample)
+                    {
+                        return true;
+                    }
+                    *NextSample = Now + Interval;
+                    TArray<USkeletalMeshComponent*> Meshes;
+                    A->GetComponents<USkeletalMeshComponent>(Meshes);
+                    for (USkeletalMeshComponent* Mesh : Meshes)
+                    {
+                        if (!MeshFilter.IsEmpty() && !Mesh->GetName().Contains(MeshFilter))
+                        {
+                            continue;
+                        }
+                        UAnimInstance* Anim = Mesh->GetAnimInstance();
+                        TArray<TSharedPtr<FJsonValue>> Montages;
+                        FString Key;
+                        for (const FAnimMontageInstance* Instance : Anim ? Anim->MontageInstances : TArray<FAnimMontageInstance*>())
+                        {
+                            const UAnimMontage* Montage = Instance ? Instance->Montage.Get() : nullptr;
+                            if (!Montage)
+                            {
+                                continue;
+                            }
+                            // Dynamic montages (PlaySlotAnimationAsDynamicMontage) are transient wrappers; the sequence is the first segment.
+                            FString Inner, Slot;
+                            if (Montage->SlotAnimTracks.Num() > 0)
+                            {
+                                Slot = Montage->SlotAnimTracks[0].SlotName.ToString();
+                                const TArray<FAnimSegment>& Segments = Montage->SlotAnimTracks[0].AnimTrack.AnimSegments;
+                                if (Segments.Num() > 0 && Segments[0].GetAnimReference())
+                                {
+                                    Inner = Segments[0].GetAnimReference()->GetName();
+                                }
+                            }
+                            auto Entry = MakeShared<FJsonObject>();
+                            Entry->SetStringField(TEXT("montage"), Montage->GetName());
+                            Entry->SetStringField(TEXT("anim"), Inner);
+                            Entry->SetStringField(TEXT("slot"), Slot);
+                            Entry->SetStringField(TEXT("section"), Instance->GetCurrentSection().ToString());
+                            Entry->SetNumberField(TEXT("position"), Instance->GetPosition());
+                            Entry->SetNumberField(TEXT("weight"), Instance->GetWeight());
+                            Entry->SetBoolField(TEXT("playing"), Instance->IsPlaying());
+                            Montages.Add(MakeShared<FJsonValueObject>(Entry));
+                            Key += FString::Printf(TEXT("%s|%s|%s|%d|%.1f;"), *Montage->GetName(), *Inner,
+                                *Instance->GetCurrentSection().ToString(), Instance->IsPlaying() ? 1 : 0, Instance->GetWeight());
+                        }
+                        // The first sample of each mesh is always kept, even when nothing plays yet.
+                        const FString* Last = LastKey->Find(Mesh->GetName());
+                        if (bChangesOnly && Last && *Last == Key)
+                        {
+                            continue;
+                        }
+                        LastKey->Add(Mesh->GetName(), Key);
+                        auto Sample = MakeShared<FJsonObject>();
+                        Sample->SetNumberField(TEXT("t"), Now - StartTime);
+                        Sample->SetStringField(TEXT("mesh"), Mesh->GetName());
+                        Sample->SetArrayField(TEXT("montages"), Montages);
+                        Samples->Add(MakeShared<FJsonValueObject>(Sample));
+                    }
+                    State->SetArrayField(TEXT("samples"), *Samples);
+                    if (Now - StartTime >= Seconds)
+                    {
+                        State->SetBoolField(TEXT("done"), true);
+                        return false;
+                    }
+                    return true;
+                }));
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("job"), Job);
+            return Result;
+        });
+
+    // player.move_to — walks the PIE player to a point along the navmesh with move input, the way a
+    // person moves (it cannot shoot meanwhile if the game says so). Params: location ([x, y, z],
+    // required), sprint (bool), move_action (default "IA_Move", Axis2D: x = right, y = forward),
+    // sprint_action (default "IA_Sprint"), acceptance (cm, default 100), timeout (game seconds,
+    // default 30), player. Returns { job }; player.job_status gives { done, result ("arrived" /
+    // "blocked" / "timeout" / "no_path"), location, distance, seconds, path_points }.
+    Registry.Register(TEXT("player.move_to"),
+        [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
+        {
+            APlayerController* Controller = PiePlayer(Params, OutError);
+            if (!Controller) return nullptr;
+            APawn* Pawn = Controller->GetPawn();
+            FVector Target;
+            if (!Pawn || !ReadPlayerPoint(Params, TEXT("location"), Target))
+            {
+                PlayerFail(OutError, Pawn ? TEXT("location ([x, y, z]) is required") : TEXT("The player has no pawn"));
+                return nullptr;
+            }
+            FString MoveName = TEXT("IA_Move"), SprintName = TEXT("IA_Sprint");
+            Params->TryGetStringField(TEXT("move_action"), MoveName);
+            Params->TryGetStringField(TEXT("sprint_action"), SprintName);
+            bool bSprint = false;
+            Params->TryGetBoolField(TEXT("sprint"), bSprint);
+            double Acceptance = 100.0, Timeout = 30.0;
+            Params->TryGetNumberField(TEXT("acceptance"), Acceptance);
+            Params->TryGetNumberField(TEXT("timeout"), Timeout);
+
+            UEnhancedInputLocalPlayerSubsystem* Input = Controller->GetLocalPlayer()
+                ? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(Controller->GetLocalPlayer()) : nullptr;
+            UInputAction* MoveAction = FindInputAction(MoveName);
+            UInputAction* SprintAction = bSprint ? FindInputAction(SprintName) : nullptr;
+            if (!Input || !MoveAction || (bSprint && !SprintAction))
+            {
+                PlayerFail(OutError, FString::Printf(TEXT("Missing Enhanced Input subsystem or action (%s%s)"), *MoveName, bSprint ? *(TEXT(", ") + SprintName) : TEXT("")));
+                return nullptr;
+            }
+
+            UWorld* World = Controller->GetWorld();
+            UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+            UNavigationPath* Path = Nav ? Nav->FindPathToLocationSynchronously(World, Pawn->GetActorLocation(), Target, Pawn) : nullptr;
+            const int32 Job = NewJob(TEXT("move_to"));
+            TSharedPtr<FJsonObject> State = JobState(Job);
+            if (!Path || !Path->IsValid() || Path->PathPoints.Num() == 0)
+            {
+                State->SetBoolField(TEXT("done"), true);
+                State->SetStringField(TEXT("result"), TEXT("no_path"));
+                auto Result = MakeShared<FJsonObject>();
+                Result->SetNumberField(TEXT("job"), Job);
+                return Result;
+            }
+            TSharedRef<TArray<FVector>> Points = MakeShared<TArray<FVector>>(Path->PathPoints);
+            State->SetNumberField(TEXT("path_points"), Points->Num());
+            if (SprintAction)
+            {
+                Input->StartContinuousInputInjectionForAction(SprintAction, FInputActionValue(true), {}, {});
+            }
+
+            struct FWalk
+            {
+                int32 Next = 1;
+                double StartTime = 0.0;
+                double LastProgressTime = 0.0;
+                double BestDistance = TNumericLimits<double>::Max();
+            };
+            TSharedRef<FWalk> Walk = MakeShared<FWalk>();
+            Walk->StartTime = Walk->LastProgressTime = World->GetTimeSeconds();
+            TWeakObjectPtr<APlayerController> WeakController = Controller;
+            TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> WeakInput = Input;
+            TWeakObjectPtr<UInputAction> WeakMove = MoveAction;
+            TWeakObjectPtr<UInputAction> WeakSprint = SprintAction;
+            FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+                [Job, WeakController, WeakInput, WeakMove, WeakSprint, Points, Target, Acceptance, Timeout, Walk](float)
+                {
+                    TSharedPtr<FJsonObject> Out = JobState(Job);
+                    APlayerController* PC = WeakController.Get();
+                    APawn* P = PC ? PC->GetPawn() : nullptr;
+                    if (!Out.IsValid()) return false;
+                    auto Stop = [&](const TCHAR* Result)
+                    {
+                        if (WeakInput.IsValid() && WeakMove.IsValid()) WeakInput->StopContinuousInputInjectionForAction(WeakMove.Get());
+                        if (WeakInput.IsValid() && WeakSprint.IsValid()) WeakInput->StopContinuousInputInjectionForAction(WeakSprint.Get());
+                        Out->SetBoolField(TEXT("done"), true);
+                        Out->SetStringField(TEXT("result"), Result);
+                        if (P)
+                        {
+                            Out->SetArrayField(TEXT("location"), VectorJson(P->GetActorLocation()));
+                            Out->SetNumberField(TEXT("distance"), FVector::Dist2D(P->GetActorLocation(), Target));
+                            Out->SetNumberField(TEXT("seconds"), P->GetWorld()->GetTimeSeconds() - Walk->StartTime);
+                        }
+                        return false;
+                    };
+                    if (!P || !P->GetWorld())
+                    {
+                        return Stop(TEXT("pie_ended"));
+                    }
+                    const double Now = P->GetWorld()->GetTimeSeconds();
+                    const FVector Here = P->GetActorLocation();
+                    const double Remaining = FVector::Dist2D(Here, Target);
+                    if (Remaining <= Acceptance)
+                    {
+                        return Stop(TEXT("arrived"));
+                    }
+                    if (Remaining < Walk->BestDistance - 10.0)
+                    {
+                        Walk->BestDistance = Remaining;
+                        Walk->LastProgressTime = Now;
+                    }
+                    if (Now - Walk->LastProgressTime > 2.0)
+                    {
+                        return Stop(TEXT("blocked"));
+                    }
+                    if (Now - Walk->StartTime > Timeout)
+                    {
+                        return Stop(TEXT("timeout"));
+                    }
+                    // Next path point we are not yet at; steer toward it relative to the control yaw.
+                    while (Walk->Next < Points->Num() - 1 && FVector::Dist2D(Here, (*Points)[Walk->Next]) < 80.0)
+                    {
+                        ++Walk->Next;
+                    }
+                    const FVector Goal = (*Points)[FMath::Min(Walk->Next, Points->Num() - 1)];
+                    const FVector Dir = (Goal - Here).GetSafeNormal2D();
+                    const FRotator Yaw(0.0, PC->GetControlRotation().Yaw, 0.0);
+                    const FVector Forward = Yaw.Vector();
+                    const FVector Right = FRotationMatrix(Yaw).GetScaledAxis(EAxis::Y);
+                    const FVector2D Axis(FVector::DotProduct(Dir, Right), FVector::DotProduct(Dir, Forward));
+                    WeakInput->StartContinuousInputInjectionForAction(WeakMove.Get(), FInputActionValue(Axis.GetSafeNormal()), {}, {});
+                    return true;
+                }));
+
+            auto Result = MakeShared<FJsonObject>();
+            Result->SetNumberField(TEXT("job"), Job);
+            Result->SetNumberField(TEXT("path_points"), Points->Num());
+            return Result;
+        });
+
+    // player.job_status — the state of an aim_at / teleport / move_to / view.capture / anim.record job. Params: job (required).
     Registry.Register(TEXT("player.job_status"),
         [](const TSharedPtr<FJsonObject>& Params, MCPProtocol::FMCPError& OutError) -> TSharedPtr<FJsonObject>
         {
