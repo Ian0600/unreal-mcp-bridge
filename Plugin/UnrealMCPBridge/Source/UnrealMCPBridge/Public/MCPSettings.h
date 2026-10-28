@@ -28,10 +28,9 @@ public:
     UPROPERTY(EditAnywhere, config, Category="MCP")
     int32 Port = 0;
 
-    // 추가 리스너 포트. 리스너 하나는 클라이언트 하나만 받는다 — FMCPServerRunnable::Run의
-    // per-client 루프가 블로킹이라 그 클라이언트가 끊기기 전에는 accept로 돌아오지 못하고,
-    // 뒤에 붙으려는 쪽은 connection refused를 맞는다. 그래서 MCP 클라이언트를 동시에
-    // 여러 개 붙이려면 포트를 나눠야 한다(예: Claude Code는 Port=30100, Codex는 여기 30101).
+    // 추가 리스너 포트. 리스너는 클라이언트마다 스레드를 띄우므로 포트 하나에 여러 MCP 클라이언트가
+    // 동시에 붙는다(2026-10-28 이전에는 포트당 하나라 포트를 나눠야 했다). 지금은 옛 플러그인을 쓰는
+    // 클라이언트 설정(UMCP_PORT=30101 등)이 계속 붙도록 남겨 둔 것이다.
     // Port와 중복되는 값과 0 이하는 무시된다.
     UPROPERTY(EditAnywhere, config, Category="MCP")
     TArray<int32> AdditionalPorts;

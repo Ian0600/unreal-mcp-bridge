@@ -107,9 +107,8 @@ void UMCPBridgeSubsystem::StartListener()
         }
     }
 
-    // 포트마다 리스너를 하나씩 띄운다. 리스너 하나가 클라이언트 하나만 받으므로
-    // (FMCPServerRunnable::Run의 per-client 루프가 블로킹) 여러 MCP 클라이언트를
-    // 동시에 붙이려면 이 방법뿐이다. 레지스트리는 하나를 공유해도 안전하다 —
+    // 포트마다 리스너를 하나씩 띄운다. 리스너는 클라이언트마다 스레드를 띄우므로 포트 하나로도
+    // 여러 MCP 클라이언트가 붙는다. 레지스트리는 하나를 공유해도 안전하다 —
     // 실제 작업은 전부 DispatchToGameThread가 GameThread로 직렬화하기 때문이다.
     for (const int32 PortToOpen : PortsToOpen)
     {

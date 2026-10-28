@@ -34,9 +34,7 @@ private:
     // Gracefully stop the servers; safe to call multiple times (idempotent).
     void HandleEditorExit();
 
-    // 포트마다 리스너 하나. 리스너 한 개가 클라이언트 한 개만 받으므로
-    // (FMCPServerRunnable::Run의 per-client 루프가 블로킹) 동시 접속 클라이언트
-    // 수만큼 포트가 필요하고, 그래서 단일 포인터가 아니라 배열이다.
+    // 포트마다 리스너 하나(Port + AdditionalPorts). 리스너 하나가 클라이언트를 여럿 받는다.
     TArray<TUniquePtr<FMCPServerRunnable>> Servers;
     TSharedPtr<FMCPCommandRegistry> Registry;
     FDelegateHandle OnExitHandle;

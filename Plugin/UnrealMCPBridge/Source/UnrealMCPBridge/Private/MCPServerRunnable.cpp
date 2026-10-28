@@ -8,6 +8,7 @@
 #include "IPAddress.h"
 #include "Sockets.h"
 #include "Common/TcpSocketBuilder.h"
+#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/ScopeExit.h"
 #include "Misc/ScopeLock.h"
@@ -28,6 +29,9 @@ namespace
     constexpr double ReadPollMillis = 200.0;
     // Hard cap so SendResponse cannot wedge if the peer stops draining.
     constexpr double SendWaitSeconds = 5.0;
+    // GameThread 응답을 기다리는 동안 Stop 을 확인하는 간격. RequestStopAndWait 는 GameThread 에서
+    // 불리므로, 한 번에 DispatchTimeoutSec 를 다 기다리면 그 시간 내내 서로를 기다린다.
+    constexpr double DispatchPollMillis = 100.0;
 
     // GameThread 에서 지금 돌고 있는 명령. 타임아웃 때 "명령이 시작조차 못 했는지(앞 명령이 막고 있음)"
     // 와 "시작해서 안 끝나는지(모달 대기 등)"를 가려 알려 주려고 둔다. 리스너가 여럿이라 전역이다.
@@ -149,6 +153,13 @@ FMCPServerRunnable::FMCPServerRunnable(
 
 FMCPServerRunnable::~FMCPServerRunnable()
 {
+    // RequestStopAndWait 를 거치지 않고 파괴돼도 클라이언트 스레드가 this 를 붙잡은 채 남지 않게 한다.
+    bStopRequested = true;
+    while (ActiveClients.GetValue() > 0)
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
+
     ReleaseModalHook();
 
     // Final safety: resources should already be released via RequestStopAndWait/Exit.
@@ -200,7 +211,7 @@ bool FMCPServerRunnable::Init()
         return false;
     }
 
-    if (!ListenSocket->Listen(1))
+    if (!ListenSocket->Listen(16))
     {
         UE_LOG(LogMCPBridge, Error, TEXT("MCPServerRunnable: listen failed."));
         SocketSubsystem->DestroySocket(ListenSocket);
@@ -239,64 +250,81 @@ uint32 FMCPServerRunnable::Run()
             continue;
         }
 
-        UE_LOG(LogMCPBridge, Log, TEXT("MCPServerRunnable: client connected from %s."),
-            *ClientAddr->ToString(true));
+        const FString ClientName = ClientAddr->ToString(true);
+        UE_LOG(LogMCPBridge, Log, TEXT("MCPServerRunnable: client connected from %s."), *ClientName);
 
-        // Fresh receive buffer for each new client to avoid cross-session bleed.
-        ReceiveBuffer.Reset();
-
-        // Persistent per-client loop.
-        while (!bStopRequested)
+        // 클라이언트마다 스레드 하나. 예전에는 여기서 그 클라이언트가 끊길 때까지 돌아서, 연결을
+        // 쥐고 있는 MCP 서버 하나가 포트를 독점하고 뒤에 붙는 쪽은 백로그에서 응답 없이 기다리다
+        // 타임아웃을 맞았다(2026-10-27). 실행은 여전히 DispatchToGameThread 가 GameThread 에서
+        // 하나씩 한다. RequestStopAndWait 가 ActiveClients 가 0 이 될 때까지 이 객체를 살려 둔다.
+        // (upstream YomenStyle/unreal-mcp-bridge a6b1944 의 동시 처리 부분)
+        ActiveClients.Increment();
+        Async(EAsyncExecution::Thread, [this, ClientSocket, ClientName]()
         {
-            FString Line;
-            bool bExceededLimit = false;
-
-            if (!ReceiveLine(ClientSocket, Line, bExceededLimit))
-            {
-                if (bExceededLimit)
-                {
-                    // Send error and drop the connection.
-                    MCPProtocol::FMCPResponse ErrResponse = MCPProtocol::MakeError(
-                        nullptr,
-                        MCPProtocol::FMCPError::InvalidRequest,
-                        TEXT("Request line exceeded maximum allowed size"));
-                    SendResponse(ClientSocket, MCPProtocol::SerializeResponse(ErrResponse));
-                }
-                UE_LOG(LogMCPBridge, Log, TEXT("MCPServerRunnable: client disconnected."));
-                break;
-            }
-
-            if (Line.IsEmpty())
-            {
-                continue;
-            }
-
-            MCPProtocol::FMCPRequest Request;
-            MCPProtocol::FMCPError ParseError;
-            if (!MCPProtocol::ParseRequest(Line, Request, ParseError))
-            {
-                if (!Request.IsNotification())
-                {
-                    MCPProtocol::FMCPResponse ErrResponse = MCPProtocol::MakeError(
-                        Request.Id, ParseError.Code, ParseError.Message);
-                    SendResponse(ClientSocket, MCPProtocol::SerializeResponse(ErrResponse));
-                }
-                continue;
-            }
-
-            MCPProtocol::FMCPResponse Response = DispatchToGameThread(Request);
-
-            // Notifications never receive a response.
-            if (!Request.IsNotification())
-            {
-                SendResponse(ClientSocket, MCPProtocol::SerializeResponse(Response));
-            }
-        }
-
-        SocketSubsystem->DestroySocket(ClientSocket);
+            ServeClient(ClientSocket, ClientName);
+            ActiveClients.Decrement();
+        });
     }
 
     return 0;
+}
+
+void FMCPServerRunnable::ServeClient(FSocket* ClientSocket, const FString& ClientName)
+{
+    // Each client has its own receive buffer to avoid cross-session bleed.
+    TArray<uint8> ReceiveBuffer;
+
+    while (!bStopRequested)
+    {
+        FString Line;
+        bool bExceededLimit = false;
+
+        if (!ReceiveLine(ClientSocket, ReceiveBuffer, Line, bExceededLimit))
+        {
+            if (bExceededLimit)
+            {
+                // Send error and drop the connection.
+                MCPProtocol::FMCPResponse ErrResponse = MCPProtocol::MakeError(
+                    nullptr,
+                    MCPProtocol::FMCPError::InvalidRequest,
+                    TEXT("Request line exceeded maximum allowed size"));
+                SendResponse(ClientSocket, MCPProtocol::SerializeResponse(ErrResponse));
+            }
+            UE_LOG(LogMCPBridge, Log, TEXT("MCPServerRunnable: client %s disconnected."), *ClientName);
+            break;
+        }
+
+        if (Line.IsEmpty())
+        {
+            continue;
+        }
+
+        MCPProtocol::FMCPRequest Request;
+        MCPProtocol::FMCPError ParseError;
+        if (!MCPProtocol::ParseRequest(Line, Request, ParseError))
+        {
+            if (!Request.IsNotification())
+            {
+                MCPProtocol::FMCPResponse ErrResponse = MCPProtocol::MakeError(
+                    Request.Id, ParseError.Code, ParseError.Message);
+                SendResponse(ClientSocket, MCPProtocol::SerializeResponse(ErrResponse));
+            }
+            continue;
+        }
+
+        MCPProtocol::FMCPResponse Response = DispatchToGameThread(Request);
+
+        // Notifications never receive a response.
+        if (!Request.IsNotification())
+        {
+            SendResponse(ClientSocket, MCPProtocol::SerializeResponse(Response));
+        }
+    }
+
+    if (ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM))
+    {
+        SocketSubsystem->DestroySocket(ClientSocket);
+    }
 }
 
 void FMCPServerRunnable::Stop()
@@ -338,9 +366,15 @@ void FMCPServerRunnable::RequestStopAndWait()
         delete Thread;
         Thread = nullptr;
     }
+    // 클라이언트 스레드는 ReadPollMillis 마다, GameThread 를 기다리는 중이면 DispatchPollMillis 마다
+    // bStopRequested 를 보므로 금방 끝난다.
+    while (ActiveClients.GetValue() > 0)
+    {
+        FPlatformProcess::Sleep(0.01f);
+    }
 }
 
-bool FMCPServerRunnable::ReceiveLine(FSocket* ClientSocket, FString& OutLine, bool& bOutExceededLimit)
+bool FMCPServerRunnable::ReceiveLine(FSocket* ClientSocket, TArray<uint8>& ReceiveBuffer, FString& OutLine, bool& bOutExceededLimit)
 {
     bOutExceededLimit = false;
     const FTimespan PollWindow = FTimespan::FromMilliseconds(ReadPollMillis);
@@ -486,8 +520,23 @@ MCPProtocol::FMCPResponse FMCPServerRunnable::DispatchToGameThread(const MCPProt
         }
     });
 
-    const FTimespan Timeout = FTimespan::FromSeconds(static_cast<double>(DispatchTimeoutSec));
-    if (Future.WaitFor(Timeout))
+    const double Deadline = FPlatformTime::Seconds() + static_cast<double>(DispatchTimeoutSec);
+    const FTimespan PollWindow = FTimespan::FromMilliseconds(DispatchPollMillis);
+    while (!Future.WaitFor(PollWindow))
+    {
+        if (bStopRequested)
+        {
+            // 리스너가 내려가는 중 — 응답을 받을 클라이언트도 곧 닫힌다. 남은 GameThread 작업은
+            // this 를 잡지 않으므로 나중에 돌아도 안전하다.
+            return MCPProtocol::MakeError(Id, MCPProtocol::FMCPError::InternalError,
+                FString::Printf(TEXT("MCP listener is stopping; '%s' was not waited for"), *Method));
+        }
+        if (FPlatformTime::Seconds() >= Deadline)
+        {
+            break;
+        }
+    }
+    if (Future.IsReady())
     {
         return Future.Get();
     }
@@ -525,7 +574,7 @@ MCPProtocol::FMCPResponse FMCPServerRunnable::DispatchToGameThread(const MCPProt
     }
     else if (InFlightMethod != Method)
     {
-        Message += FString::Printf(TEXT(" — still running an earlier command '%s' (%.1fs)"), *InFlightMethod, InFlightSeconds);
+        Message += FString::Printf(TEXT(" — still running an earlier command '%s' (%.1fs, possibly from another client)"), *InFlightMethod, InFlightSeconds);
     }
     else
     {
